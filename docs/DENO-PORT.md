@@ -190,6 +190,14 @@ Deno Deploy 官方文档：每个实例"彼此完全隔离，**不共享 CPU、�
 > 数据库必须允许任意 IP 连接（靠强密码 + TLS 兜）。介意就用它代开的 Prisma Postgres
 > （注意 "claim" 是**不可逆**操作）。
 
+> **别忘了把库「挂到 app 上」。** 只在组织里创建/链接实例还不够，还得在
+> app settings → Databases → Attach Database 里指派给这个 app，否则平台不会注入
+> `DATABASE_URL` / `PGHOST`。这个症状很好认：启动日志里出现
+> **`connect ECONNREFUSED 127.0.0.1:5432`** —— 那是 `pg` 在**完全没有连接信息**时的
+> 默认值（localhost + 5432），不是你的库不可达。
+> 现在 `drivers/postgres.js` 会对这种情况直接报出「没有连接信息、请挂库」，
+> 而不是让人对着 localhost 发懵。
+
 **② 这是 monorepo，必须把 App directory 设成「仓库根」。** ⚠️
 
 > 早先的 `getting_started` 页面写着 "Mono-repos … are not yet supported"，

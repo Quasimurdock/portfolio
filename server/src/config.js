@@ -143,3 +143,15 @@ export const DATA_DIR = path.dirname(config.databaseFile)
 
 /** True when the secret is still the shipped development placeholder. */
 export const usingDefaultCookieSecret = config.cookieSecret === 'change-me'
+
+/**
+ * True on Deno Deploy, which sets `DENO_DEPLOY=true` for builds, for the
+ * pre-deploy command and for the runtime alike.
+ *
+ * The sanity checks key off this because both of this project's default
+ * fallbacks are actively wrong on that platform: every instance has its own
+ * isolated ephemeral disk, so a SQLite file cannot hold the data — and `pg`
+ * falling back to `localhost:5432` can never resolve, because there is no local
+ * database in the sandbox.
+ */
+export const onDenoDeploy = /^(1|true|yes|on)$/i.test(process.env.DENO_DEPLOY ?? '')

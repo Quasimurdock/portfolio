@@ -32,6 +32,7 @@
  * seeded demo accounts (password "portfolio") if you would rather not set it.
  */
 import { describeTarget, driverName, get, initDb, insertReturningId, run, tx } from './db.js'
+import { onDenoDeploy } from './config.js'
 import { hashPassword } from './auth.js'
 import { record } from './audit.js'
 import { ROLE_KEYS } from './permissions.js'
@@ -59,7 +60,7 @@ function truthy(value) {
  * That is worth a failed build.
  */
 function assertUsableTarget() {
-  if (!truthy(process.env.DENO_DEPLOY) || driverName === 'postgres') return
+  if (!onDenoDeploy || driverName === 'postgres') return
   throw new Error(
     `DB_DRIVER is "${driverName}" but this is running on Deno Deploy, where every instance has its ` +
       'own ephemeral disk. Seeding SQLite here would write to a file that is discarded, leaving the ' +

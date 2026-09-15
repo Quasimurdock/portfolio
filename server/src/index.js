@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { config } from './config.js'
+import { config, onDenoDeploy } from './config.js'
 import { describeTarget, initDb } from './db.js'
 import { parseCookies, pruneExpiredSessions } from './auth.js'
 import { attachUser } from './middleware.js'
@@ -161,7 +161,7 @@ export async function start() {
   // the site boots empty and every login is a 401 with nothing in the logs to
   // explain it. `bootstrap.js` refuses to seed in this state; this is the
   // runtime half of the same check, for when the two disagree.
-  if (process.env.DENO_DEPLOY && config.dbDriver !== 'postgres') {
+  if (onDenoDeploy && config.dbDriver !== 'postgres') {
     console.warn(
       '!! DB_DRIVER is not "postgres" but DENO_DEPLOY is set: this instance is writing to an ' +
         'ephemeral disk, so data will vanish and instances will disagree. Attach a database and ' +

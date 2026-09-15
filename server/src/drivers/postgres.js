@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import pg from 'pg'
-import { config, SERVER_ROOT } from '../config.js'
+import { config, onDenoDeploy, SERVER_ROOT } from '../config.js'
 
 const SCHEMA_FILE = path.join(SERVER_ROOT, 'src', 'schema.postgres.sql')
 
@@ -176,6 +176,23 @@ export function toPositional(sql) {
  */
 function open() {
   if (pool) return pool
+
+  // `pg` silently falls back to localhost:5432 when it is handed no connection
+  // details at all. On Deno Deploy that is guaranteed to fail, and the resulting
+  // `ECONNREFUSED 127.0.0.1:5432` points at a database that was never supposed
+  // to exist instead of at the real problem: nothing is attached to the app.
+  const hasEnvConnection =
+    Boolean(process.env.PGHOST) || Boolean(process.env.PGDATABASE) || Boolean(process.env.PGUSER)
+  if (onDenoDeploy && !config.databaseUrl && !hasEnvConnection) {
+    throw new Error(
+      'DB_DRIVER=postgres but there are no connection details: DATABASE_URL is empty and ' +
+        'PGHOST / PGDATABASE are unset, so `pg` would try localhost:5432 — which does not exist on ' +
+        'Deno Deploy. Attach a database to this app (app settings → Databases → Attach Database, ' +
+        'then pick or provision a Postgres instance) and redeploy: the platform then injects ' +
+        'DATABASE_URL plus PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE on its own.',
+    )
+  }
+
   const ssl =
     config.pgSsl === 'no-verify' ? { rejectUnauthorized: false } : config.pgSsl === 'require' ? true : undefined
   pool = new pg.Pool({
@@ -191,7 +208,17 @@ export async function init() {
   open()
   if (schemaReady) return
   // Fail loudly at boot rather than on the first request.
-  await pool.query('SELECT 1')
+  try {
+    await pool.query('SELECT 1')
+  } catch (error) {
+    if (!onDenoDeploy) throw error
+    throw new Error(
+      `${error.message}\n` +
+        '  This is Deno Deploy: confirm a Postgres database is attached to this app and that its ' +
+        'connection variables reach this environment (the Production context, not only Build).',
+      { cause: error },
+    )
+  }
   if (config.dbAutoSchema) await applySchema()
   schemaReady = true
 }
