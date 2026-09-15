@@ -243,7 +243,7 @@ Entrypoint 设为 `server/src/index.js`。
 | ├ Arguments | 留空 |
 | └ Runtime working directory | 留空（`config.js` 用 `import.meta.url` 定位 `server/`，不依赖 cwd） |
 | Static Directory | 留空 —— 那是 Static 模式才用的。站点由 Express 自己托管 `web/dist`，这样站点与 API 同源，`SameSite=Lax` 的会话 cookie 才成立 |
-| Pre-Deploy Command | `deno run --allow-all server/src/bootstrap.js` —— 幂等，每次部署都安全：空库才灌 seed，然后按环境变量保证有一个能登录的账号（§6.3） |
+| Pre-Deploy Command | `deno run --allow-all server/src/bootstrap.js` —— 幂等，每次部署都安全：空库才灌**结构**（roles / permissions / role_permissions / sections，约 100 条语句），然后按环境变量保证有一个能登录的账号。**默认不灌演示内容** —— 那约 2000 次往返，会撞 5 分钟构建超时（§6.3.2） |
 | Build timeout | 默认 5 分钟；`npm install`（走镜像）+ `vite build` 有可能不够，超时再调 |
 
 > `.npmrc` 把 registry 钉在 `registry.npmmirror.com`（见文件里的注释：这台机器连不上
@@ -330,7 +330,18 @@ DEMO_OWNER_RESET_PASSWORD=1             # 可选：把已存在账号的密码�
   密码本来就在你手上。
 * **已存在的账号不动。** 除非 `DEMO_OWNER_RESET_PASSWORD=1`，
   你在后台改过的名字/密码不会被下次部署覆盖回去。
-* **空库才灌 seed。** 否则每次部署都会把演示行 upsert 回原样，抹掉你的编辑。
+* **空库才灌，而且默认只灌「结构」。** 结构 = roles / permissions /
+  role_permissions / sections —— 这四张表就够应用跑起来（`sections` 没有写接口，
+  不灌就永远建不出分区，新建文章会被 `requireSection()` 打回 400）。
+  演示内容另算：它约 **2000 次往返**（894 张图，每张是一次 upsert = `SELECT` + `INSERT`），
+  对本地库是瞬间，对跨区域的托管 Postgres 就是**几分钟** —— 实测 pre-deploy 跑了
+  **5m36s** 被构建超时切断，日志停在
+  `bootstrap: empty database — seeding the demo content`。
+  * 想要演示内容：在**你笔记本上**跑一次 `deno task seed`（没有构建超时，慢慢跑完即可）。
+    之后部署时 `sections` 已非空 → pre-deploy 直接跳过，全程很快。
+  * 或者设 `SEED_DEMO_CONTENT=1` 让 pre-deploy 也灌（需要更长的构建超时，Pro 可到 15 分钟）。
+  * 只要结构 + 你的账号其实就够用：站点导航、后台、RBAC、新建文章/合集全部正常
+    —— 已验证，空库 bootstrap 之后 `POST /api/admin/articles` 返回 **201**。
 
 > 实测：连跑三次，第一次灌 seed + 打警告，第二次建号，第三次两个步骤都跳过；
 > 用 bootstrap 建的账号登录 → `200`，`/api/admin/overview`、`/roles`、`/users` 全部
@@ -462,6 +473,7 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 | 7 | 启动日志报错数据库 | 连的是 Postgres，却打印 SQLite 文件路径（无条件输出 `config.databaseFile`） | 新增 `describeTarget()`，boot 日志与 CLI 共用；顺带修掉 CLI 里同样的硬编码 |
 | 8 | **概览面板不认 `*.read_all`**（`main` 上就有，**不是本次迁移引入的**） | `overview.js` 调 `ownershipClause()` 时没传 `scope`，而该函数「没传就是 `mine`」→ 全新 owner 打开后台看到**全 0**，可列表页却是 `canReadAll ? 'all' : 'mine'`，两边对不上 | 改成 `scope: req.query.scope ?? 'all'`（无权限者会被 `ownershipClause` 降级回 `mine`），并在 smoke 里补 2 条断言锁住行为 |
 | 9 | **Deploy 上端口回退成 8787**（只有真实部署才暴露） | 以为平台会注入 `PORT`，实际没有：应用打印 `listening on …:8787`，Warm up **4m44s** 超时，而应用自己的日志一切正常 | `config.js` 改成 `int('PORT', onDenoDeploy ? 8000 : 8787)` —— 平台探的是 `Deno.serve()` 的默认端口 8000 |
+| 10 | **pre-deploy 命令撞构建超时**（同上，只有真实部署才暴露） | 空库时 bootstrap 灌完整演示内容 ≈ **2000 次往返**（894 张图 × upsert 的 `SELECT`+`INSERT`）：本地瞬间，跨区域托管 Postgres 上是几分钟 → pre-deploy 跑了 **5m36s** 被切断，日志停在 `seeding the demo content` | 拆出 `seedStructure()`（约 100 条语句）；`bootstrap.js` 默认只灌结构，演示内容交给 `deno task seed`（本机、无超时）或 `SEED_DEMO_CONTENT=1` |
 
 > 第 7 条值得单独强调：冒烟测试全绿，但只要看一眼启动日志就会以为自己在用 SQLite。
 > 这种"能跑但在说谎"的问题，只有真的把进程启起来盯着日志看才会发现。
@@ -512,6 +524,9 @@ Windows 上把三个命令换成 `D:\pgsql\bin\{initdb,pg_ctl,createdb}.exe` 的
 * **`tx()` 回调必须是 async 且不能用 `forEach`**：这个约束只能靠注释和 review 守住，
   运行时不会报错。已在 `db.js` 的 JSDoc 与本节反复写明。
 * **时间戳仍是 `TEXT`**：有意为之，见 §4。
-* **冷启动时跑 DDL**：`initSchema` 在 boot 时应用幂等 DDL。12 条
-  `CREATE TABLE IF NOT EXISTS` 开销很小，但正式环境更适合改成 Pre-Deploy Command。
+* **冷启动时跑 DDL**：`initSchema` 在 boot 时应用幂等 DDL（12 张表 + 索引 + 补外键的
+  `DO $$` 块）。对本地库开销很小，但在 Deploy 上每次冷启动都要为它走一遍跨区域往返。
+  想让 Pre-Deploy Command 独占 schema 的话，**现在还不能直接设 `DB_AUTO_SCHEMA=0`** ——
+  `bootstrap.js` 也是靠 `initDb()` 建表的，关掉它连表都建不出来（pre-deploy 会失败）。
+  要关就得先给 `db.js` 加一个无条件建表的 `ensureSchema()`，让 bootstrap 改用它。
 * **`isUniqueViolation()` 是文案 + SQLSTATE 双重判断**：如果将来换驱动，需要复核。

@@ -548,11 +548,32 @@ async function resolveFeedTarget(path, caption) {
   return { linkKind: 'none', targetCollectionId: null, targetArticleId: null }
 }
 
-export async function seedEverything() {
+/**
+ * The part the application needs in order to work at all: the permission
+ * catalogue, the roles that reference it, and the sections.
+ *
+ * `sections` has no write endpoint anywhere in the API, so if this does not run
+ * there is no other way to create them — and without a section you cannot create
+ * a collection or an article (`requireSection()` answers 400).
+ */
+export async function seedStructure() {
   await upsertPermissions() // roles link to these, so they must exist first
   await upsertRoles()
-  const userIds = await upsertUsers()
   await upsertSections()
+}
+
+/**
+ * Everything, demo content included (docs/API.md §5).
+ *
+ * The demo content is roughly 2000 individually round-tripped statements — 894
+ * images alone, each an upsert (`SELECT` + `INSERT`) — which is nothing against
+ * a local database but is minutes of pure latency against a managed Postgres in
+ * another region. `bootstrap.js` therefore seeds only `seedStructure()` unless
+ * `SEED_DEMO_CONTENT=1` is set.
+ */
+export async function seedEverything() {
+  await seedStructure()
+  const userIds = await upsertUsers()
 
   const ownerId = userIds['owner@portfolio.test']
   const editorId = userIds['editor@portfolio.test']

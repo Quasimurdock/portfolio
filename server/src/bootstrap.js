@@ -12,9 +12,12 @@
  * three things:
  *
  *   1. applies the schema (idempotent DDL)
- *   2. seeds the demo content, `sections` and the RBAC matrix **if the database
- *      is still empty** — `sections` has no write API, so without this a fresh
- *      database can never create an article or a collection
+ *   2. seeds the structure — roles, permissions and `sections` — **if the
+ *      database is still empty**. `sections` has no write API, so without this a
+ *      fresh database can never create an article or a collection. The demo
+ *      content is deliberately left out: it is ~2000 round trips (894 images,
+ *      each an upsert), which against a managed Postgres in another region takes
+ *      minutes and outlives the build timeout.
  *   3. ensures a sign-in account exists, from the environment:
  *
  *        DEMO_OWNER_EMAIL             default demo@portfolio.test
@@ -22,21 +25,23 @@
  *        DEMO_OWNER_NAME              default: the email's local part
  *        DEMO_OWNER_ROLE              default owner
  *        DEMO_OWNER_RESET_PASSWORD=1  also overwrite an existing password
+ *        SEED_DEMO_CONTENT=1          seed the demo content too — better done
+ *                                     once from a laptop via `deno task seed`,
+ *                                     which has no build timeout
  *
  * An account that already exists is left exactly as it is unless
  * DEMO_OWNER_RESET_PASSWORD=1, so editing a name or password in the admin UI
  * survives the next deploy. With no DEMO_OWNER_PASSWORD set this step is skipped
  * with a warning rather than failing the build.
  *
- * The password is never logged: Deno Deploy keeps build logs. Use one of the
- * seeded demo accounts (password "portfolio") if you would rather not set it.
+ * The password is never logged: Deno Deploy keeps build logs.
  */
 import { describeTarget, driverName, get, initDb, insertReturningId, run, tx } from './db.js'
 import { onDenoDeploy } from './config.js'
 import { hashPassword } from './auth.js'
 import { record } from './audit.js'
 import { ROLE_KEYS } from './permissions.js'
-import { seedEverything } from './seed.js'
+import { seedEverything, seedStructure } from './seed.js'
 
 const DEFAULT_EMAIL = 'demo@portfolio.test'
 
@@ -76,11 +81,16 @@ async function seedIfEmpty() {
   // the honest answer to "has this database ever been seeded?".
   const { n } = await get('SELECT COUNT(*) AS n FROM sections')
   if (n > 0) {
-    console.log(`bootstrap: ${n} sections already present — leaving the demo seed alone`)
+    console.log(`bootstrap: ${n} sections already present — leaving the seed alone`)
     return
   }
-  console.log('bootstrap: empty database — seeding the demo content')
-  await tx(seedEverything)
+  if (truthy(env('SEED_DEMO_CONTENT'))) {
+    console.log('bootstrap: empty database — seeding everything, demo content included (~2000 round trips)')
+    await tx(seedEverything)
+    return
+  }
+  console.log('bootstrap: empty database — seeding the structure (roles, permissions, sections)')
+  await tx(seedStructure)
 }
 
 async function ensureAccount() {
