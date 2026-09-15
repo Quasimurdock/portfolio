@@ -1,0 +1,29 @@
+# Normalise line endings in the repository, so a checkout on Linux (the VPS, the
+# Docker build) never receives CRLF.
+#
+# This matters concretely here: `deploy/entrypoint.sh` is executed by /bin/sh
+# inside the container, and a CRLF shebang fails with "not found"; the same goes
+# for the Caddyfile and the systemd unit. Windows checkouts still get CRLF in the
+# working tree, because core.autocrlf is honoured on the way out.
+* text=auto eol=lf
+
+# Scripts and service definitions must be LF even on Windows checkouts.
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+*.service text eol=lf
+Caddyfile text eol=lf
+.editorconfig text eol=lf
+.npmrc text eol=lf
+.env.example text eol=lf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.node binary

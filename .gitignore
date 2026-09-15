@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# SQLite database + WAL sidecars (recreate with `npm run seed`).
+# File patterns rather than whole directories, so `server/data/.gitkeep` — which
+# documents where the database goes — can still be tracked. `db.js` creates the
+# directory on demand, so a fresh clone needs nothing here to work.
+*.db
+*.db-wal
+*.db-shm
+
+# local configuration
+.env
+.env.local
+server/.env
+
+# editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# release archives are not source
+*.zip

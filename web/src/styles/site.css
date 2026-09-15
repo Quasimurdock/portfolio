@@ -1,0 +1,634 @@
+
+/* ==========================================================================
+   Portfolio — single-file Vue 3 app
+   Structure replicated from nadavkander.com:
+     fixed header (title + 4-column nav)  >  header placeholder  >  mobile title
+     >  main content (feed slideshow | series grid | series lightbox | lists)
+     >  footer (subscribe + social + copyright)
+   Measured reference geometry is encoded directly in the rules below.
+   ========================================================================== */
+
+/* ---------- tokens ---------- */
+:root{
+  --ink:#000;
+  --paper:#fff;
+  --rule:#e6e6e6;
+  --rule-soft:#f0f0f0;
+  --muted:rgba(0,0,0,.5);
+  --plate:rgba(0,0,0,.075);       /* image placeholder grey */
+  --gutter:4vw;                    /* page side margin (grid-wrap) */
+  --half:2vw;                      /* half gutter (container--half-pad) */
+  --header-h:113px;                /* fixed header height, >=1024px */
+  --placeholder-h:77px;            /* spacer under the header */
+  --footer-h:52px;                 /* footer height — refined at runtime by script */
+  --feed-pad-top:50px;             /* studio-feed breathing space */
+  --feed-pad-bottom:164px;
+  --title-h:37px;                  /* page title bar height (9px padding + line + 9px) */
+  --title-gap:25px;                /* air between the page title bar and the content */
+  --title-mark-w:4px;              /* vertical marker left of the page title */
+  --title-mark-h:15px;
+  --title-mark-gap:9px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+}
+@media (min-width:1250px){
+  :root{ --gutter:50px; --half:25px; }   /* 4.16667em / 2.08333em at a 12px base */
+}
+@media (min-width:1024px){
+  :root{ --placeholder-h:var(--header-h); }
+}
+
+/* ---------- reset ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Archivo','Univers Next W01',Helvetica,'Helvetica Neue',Arial,sans-serif;
+  font-size:12px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+img{ border:0; max-width:100%; display:block; }
+a{ color:inherit; text-decoration:none; }
+button{ font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+h1,h2,h3,p,figure,fieldset{ margin:0; }
+fieldset{ border:0; padding:0; min-width:0; }
+ul{ margin:0; padding:0; list-style:none; }
+input{ font:inherit; color:inherit; }
+::selection{ background:#000; color:#fff; }
+:focus-visible{ outline:1px solid #000; outline-offset:2px; }
+
+.clear::after{ content:''; display:table; clear:both; }
+.container{ width:100%; padding:0 var(--gutter); }
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+.site-header{
+  position:fixed; top:0; left:0; width:100%;
+  z-index:15;
+  background:var(--paper);
+  -webkit-backface-visibility:hidden;
+  backface-visibility:hidden;
+  transform:translateZ(0);
+}
+.site-header__inner{ padding-bottom:0; }
+.site-header .wrapper{
+  position:relative;
+  padding:9px 0 45px;                       /* 0.5625rem 0 3.71667em */
+  border-bottom:1px solid transparent;
+  transition:border-color 150ms linear;
+}
+.site-header.is-scrolled .wrapper{ border-bottom-color:var(--rule); }
+
+.site-title{ font-weight:700; }
+.site-title a{ transition:opacity 200ms linear; }
+.site-title a:hover{ opacity:.55; }
+
+.nav-trigger{
+  display:none;
+  float:right;
+  position:relative;
+  z-index:10;
+  width:26px; height:19px;
+  background:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='25' height='17'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 .5h25M0 8.5h25M0 16.5h25'/%3E%3C/g%3E%3C/svg%3E") no-repeat 0 50%;
+  background-size:25px 17px;
+  border-radius:0;
+  transition:opacity 200ms linear;
+}
+.nav-trigger:hover{ opacity:.55; }
+.nav-trigger.is-open{
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='25' height='17'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M1 1l23 15M24 1L1 16'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.site-nav ul{
+  margin:0; padding:0; list-style:none;
+  display:flex;
+  flex-flow:column wrap;                    /* fills 3 rows, then wraps into columns */
+  height:58px;
+  column-gap:50px;
+}
+.site-nav li{ display:block; white-space:nowrap; }
+.site-nav li.active{ font-weight:600; }
+.site-nav a{ display:block; transition:opacity 200ms linear; }
+.site-nav a:hover{ opacity:.5; }
+
+/* nav column behaviour (measured): 4 equal columns >=1250px, content-sized columns
+   distributed across the right half between 1024 and 1249px */
+@media (min-width:1024px){
+  .site-title{ position:absolute; left:0; top:9px; font-size:16.5px; line-height:1.25; }
+  .site-nav{ float:right; width:46vw; max-width:575px; padding-left:2vw; }
+}
+@media (min-width:1024px) and (max-width:1249px){
+  .site-nav ul{ justify-content:space-between; column-gap:2vw; }
+}
+@media (min-width:1250px){
+  .site-nav{ float:left; margin-left:50%; padding-left:25px; }
+}
+
+/* --- mobile / tablet: title bar + collapsible nav --- */
+@media (max-width:1023px){
+  .site-header .wrapper{ padding:9px 0 10px; }
+  .site-title{ float:left; position:relative; z-index:10; font-size:12px; line-height:1.6; }
+  .nav-trigger{ display:block; }
+  .nav-wrapper{
+    display:none;
+    clear:both;
+  }
+  .nav-wrapper.is-open{ display:block; animation:reveal 260ms var(--ease-out) both; }
+  .site-nav{ padding:9.8px 0; margin:0 var(--gutter); border-bottom:1px solid var(--rule); }
+  .site-nav ul{
+    display:block; height:auto;
+    column-count:2; column-gap:4vw;
+    margin:-.4rem 0;
+  }
+  .site-nav ul li{ break-inside:avoid; }
+  .site-nav a{ padding:.4rem 0; }
+  .site-title a, .site-nav a{ font-size:12px; }
+}
+
+.header-placeholder{ height:var(--placeholder-h); }
+
+/* ==========================================================================
+   Page title bar
+   The reference shows this band below 1024px only ("mobile-title"); here it
+   stays visible at every width so a page always announces itself.
+   ========================================================================== */
+.page-title{ display:block; width:100%; }
+.page-title__section{
+  position:relative;
+  padding:9px 0 9px calc(var(--title-mark-w) + var(--title-mark-gap));
+  font-weight:700;
+}
+/* a narrow vertical bar sits on the left alignment line, the title hangs beside it
+   (absolutely positioned, so the bar height stays 37px and the layout maths hold) */
+.page-title__section::before{
+  content:'';
+  position:absolute;
+  left:0; top:50%;
+  transform:translateY(-50%);
+  width:var(--title-mark-w);
+  height:var(--title-mark-h);
+  background:#000;
+}
+.page-title__section:empty{ display:none; }   /* the studio feed has no title */
+
+/* ==========================================================================
+   Content shell
+   ========================================================================== */
+.site-content{ position:relative; }
+/* only pages that actually show a title bar get the extra top space, so the
+   studio feed (which has no title) keeps its exact viewport-fitting height */
+.site-content.has-page-title{ padding-top:var(--title-gap); }
+
+/* Sticky footer: the page is at least one viewport tall and the footer is
+   pushed to the bottom of it, so a short page never leaves the footer stranded
+   in the middle of the screen. The studio feed is excluded — it pins its own
+   footer and sizes its stage for the viewport itself, so stretching its main
+   region would push the count/caption line under that fixed footer. */
+.site{
+  display:flex;
+  flex-direction:column;
+  min-height:100vh;
+  min-height:100dvh;
+}
+.load-content{
+  display:flex;
+  flex-direction:column;
+  flex:1 1 auto;
+}
+.site-content{ flex:1 0 auto; }        /* absorb the leftover height */
+.is-feed .site-content{ flex:0 0 auto; }
+.site-footer{ margin-top:auto; }       /* and hold the footer down */
+
+/* ==========================================================================
+   Slider — a three-slide window (prev / current / next) that follows the
+   finger and snaps. Used by the studio feed and the series lightbox.
+   ========================================================================== */
+.slider-viewport{ position:relative; width:100%; height:100%; overflow:hidden; }
+.slider-track{
+  display:flex;
+  height:100%;
+  width:calc(100% * var(--slide-count, 3));
+  will-change:transform;
+  backface-visibility:hidden;
+}
+.slider-slide{
+  flex:0 0 calc(100% / var(--slide-count, 3));
+  height:100%;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* ==========================================================================
+   Grids (series index pages, series thumbnails, list pages, monographs)
+   ========================================================================== */
+.grid-wrap{ margin:0 var(--gutter); overflow:hidden; }
+.image-grid{ margin:0 calc(-1 * var(--gutter)); }
+.container--half-pad{ padding:0 var(--half); }
+
+.grid-single{
+  display:inline-block;
+  vertical-align:top;
+  width:100%;
+  margin:0 0 var(--gutter);
+}
+.grid-single__inner{
+  display:block;
+  position:relative;
+  margin:0 var(--half);
+}
+.grid-single__img-wrap{ position:relative; overflow:hidden; }
+
+/* aspect-ratio box (padding-bottom 130%) with a grey plate until the image arrives */
+.grid-single__img{
+  position:relative;
+  padding-bottom:130%;
+  background-color:var(--plate);
+  background-size:cover;
+  background-position:50% 50%;
+  background-repeat:no-repeat;
+}
+.grid-single__img::after{
+  content:'';
+  position:absolute; inset:0;
+  background-image:inherit;               /* inherits the URL the loader sets */
+  background-size:cover;
+  background-position:50% 50%;
+  background-repeat:no-repeat;
+  opacity:0;
+  transition:opacity 700ms var(--ease);
+}
+.grid-single__img.is-loaded::after{ opacity:1; }
+/* while a photograph is in flight the plate breathes, so a slow connection reads
+   as "loading" rather than "broken" */
+.grid-single__img.is-loading{ animation:platePulse 1.8s ease-in-out infinite; }
+@keyframes platePulse{
+  0%,100%{ background-color:rgba(0,0,0,.055); }
+  50%{ background-color:rgba(0,0,0,.115); }
+}
+.grid-single__caption{ margin:9px 0; line-height:1.6; }
+@media (min-width:400px){
+  .grid-single__caption{ margin:9px 0 27px; }   /* 3-line caption rhythm, as measured */
+}
+.grid-single__caption strong{ font-weight:700; }
+.grid-single__meta{ color:var(--muted); }
+
+/* hover: the reference darkens nothing, it simply lets the work breathe */
+@media (hover:hover){
+  .grid-single__inner:hover .grid-single__img::after{ opacity:.92; }
+  .grid-single__inner:hover .grid-single__caption strong{ text-decoration:underline; text-underline-offset:2px; }
+}
+.grid-single__inner:focus-visible{ outline:1px solid #000; outline-offset:4px; }
+
+/* staggered entrance for grid cards */
+.grid-single{ animation:rise 620ms var(--ease-out) both; animation-delay:calc(min(var(--i,0),11) * 45ms); }
+
+@media (min-width:400px){ .grid-single{ width:50%; } }
+@media (min-width:768px){ .grid-single{ width:33.3333%; } }
+@media (min-width:1024px){
+  .grid-single{ width:25%; margin-bottom:50px; }
+}
+
+/* Series thumbnails — deliberately a smaller, denser register than the hero
+   above them, at every width, so a thumbnail never reads as another hero frame.
+   (The generic grid widths would leave one full-width column on phones, making
+   each thumbnail almost the size of the photograph itself.) */
+.image-grid--thumbs{ padding-top:24px; }
+.image-grid--thumbs .grid-single{ width:33.3333%; margin-bottom:9px; }
+.image-grid--thumbs .grid-single__caption{ font-size:11px; color:var(--muted); margin:9px 0; }
+.image-grid--thumbs .grid-single.is-active .grid-single__img{
+  outline:1px solid #000;
+  outline-offset:-4px;
+}
+.image-grid--thumbs .grid-single.is-active .grid-single__caption{ color:#000; }
+@media (max-width:479px){
+  .image-grid--thumbs .grid-single{ width:50%; }        /* two up on small phones */
+}
+@media (min-width:1024px){
+  .image-grid--thumbs{ padding-top:50px; }
+  .image-grid--thumbs .grid-single{ width:16.6667%; }  /* six up on desktop */
+}
+
+/* bordered list pages (News / Exhibitions / Essays & Reviews) */
+.grid-single--list .grid-single__inner{
+  border-top:1px solid var(--rule);
+  padding-top:9px;
+  min-height:100%;
+}
+.grid-single--list .grid-single__caption{ margin:0 0 27px; }
+@media (min-width:1024px){ .grid-single--list{ width:33.3333%; } }
+
+/* film cards */
+.film-card .grid-single__img{ padding-bottom:56.25%; }
+.film-card .play{
+  position:absolute; inset:0; margin:auto;
+  width:38px; height:38px;
+  border:1px solid rgba(255,255,255,.85);
+  border-radius:50%;
+  background:rgba(0,0,0,.25);
+  z-index:2;
+  transition:transform 300ms var(--ease), background 300ms linear;
+}
+.film-card .play::after{
+  content:''; position:absolute; inset:0; margin:auto;
+  width:0; height:0;
+  border-left:10px solid #fff;
+  border-top:6px solid transparent;
+  border-bottom:6px solid transparent;
+  transform:translateX(2px);
+}
+.film-card .grid-single__inner:hover .play{ transform:scale(1.08); background:rgba(0,0,0,.45); }
+
+/* ==========================================================================
+   Studio feed (home) — full-viewport slideshow with a count + caption line
+   ========================================================================== */
+.site-content--feed{ padding:var(--feed-pad-top) 0 var(--feed-pad-bottom); }
+.swiper-curated{
+  position:relative;
+  /* the stage fills exactly what is left between header, info line and the pinned footer */
+  height:calc(100vh - var(--placeholder-h) - var(--feed-pad-top) - var(--feed-pad-bottom) - var(--footer-h));
+  height:calc(100dvh - var(--placeholder-h) - var(--feed-pad-top) - var(--feed-pad-bottom) - var(--footer-h));
+  min-height:240px;
+  opacity:0;
+  transition:opacity 700ms var(--ease);
+}
+.swiper-curated.is-ready{ opacity:1; }
+.curated-wrap{
+  position:relative;
+  height:100%;
+  padding:0 var(--half);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.curated-col{ display:flex; align-items:center; justify-content:center; height:100%; width:100%; }
+.curated-single{
+  display:flex; align-items:center; justify-content:center;
+  height:100%; width:100%;
+}
+.curated-single img{
+  max-width:100%;
+  max-height:100%;
+  width:auto; height:auto;
+  object-fit:contain;
+}
+.curated-nav{
+  position:absolute; top:0; bottom:0;
+  width:14vw; max-width:160px;
+  z-index:2;
+  opacity:0;
+  transition:opacity 250ms linear;
+}
+.curated-nav::after{
+  content:''; position:absolute; top:50%; left:50%;
+  width:9px; height:9px;
+  border-top:1px solid #000; border-right:1px solid #000;
+}
+.curated-nav--prev{ left:0; }
+.curated-nav--prev::after{ transform:translate(-50%,-50%) rotate(-135deg); }
+.curated-nav--next{ right:0; }
+.curated-nav--next::after{ transform:translate(-50%,-50%) rotate(45deg); }
+.swiper-curated:hover .curated-nav{ opacity:.35; }
+.curated-nav:hover{ opacity:1 !important; }
+
+.swiper-curated__info{
+  position:absolute;
+  bottom:0; left:var(--gutter); right:var(--gutter);
+  padding:0 0 9px;
+  display:flex;
+  align-items:baseline;
+}
+.swiper-curated__count{ display:inline-block; margin:0 1.5em 0 0; font-variant-numeric:tabular-nums; }
+.swiper-curated__caption{ display:none; color:var(--muted); }
+@media (min-width:1024px){ .swiper-curated__caption{ display:inline-block; } }
+
+/* feed keeps the footer pinned, exactly like the reference */
+.is-feed .site-footer{ position:fixed; bottom:0; left:0; width:100%; background:var(--paper); z-index:12; }
+@media (max-width:1023px){
+  :root{ --feed-pad-top:24px; --feed-pad-bottom:120px; --footer-h:90px; }
+}
+
+/* ==========================================================================
+   Series (lightbox hero + thumbnail strip)
+   ========================================================================== */
+.lightbox-gallery{
+  position:relative;
+  /* 184px = header band + slack (reference value); the title bar and its gap are
+     then discounted so title area + hero still fill the first screen as the
+     reference's 716px hero does */
+  height:calc(100vh - 184px - var(--title-h) - var(--title-gap));
+  height:calc(100dvh - 184px - var(--title-h) - var(--title-gap));
+  min-height:360px;
+}
+.single-lightbox{
+  position:absolute; inset:0;
+  padding-bottom:31.25px;
+  overflow:hidden;
+}
+.single-lightbox__img-wrap{
+  position:relative;
+  height:100%;
+  padding:0 var(--gutter);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.single-lightbox__img-wrap img{
+  max-width:100%;
+  max-height:100%;
+  width:auto; height:auto;
+  object-fit:contain;
+  opacity:0;
+  transition:opacity 600ms var(--ease);
+}
+.single-lightbox__img-wrap img.is-loaded{ opacity:1; }
+
+.lightbox-nav{
+  position:absolute; top:0; bottom:0; width:12vw; max-width:150px; z-index:2;
+  opacity:0; transition:opacity 250ms linear;
+}
+.lightbox-nav::after{
+  content:''; position:absolute; top:50%; left:50%;
+  width:10px; height:10px;
+  border-top:1px solid #000; border-right:1px solid #000;
+}
+.lightbox-nav--prev{ left:0; }
+.lightbox-nav--prev::after{ transform:translate(-50%,-50%) rotate(-135deg); }
+.lightbox-nav--next{ right:0; }
+.lightbox-nav--next::after{ transform:translate(-50%,-50%) rotate(45deg); }
+.lightbox-gallery:hover .lightbox-nav{ opacity:.35; }
+.lightbox-nav:hover{ opacity:1; }
+
+/* touch behaviour: vertical page scrolling and pinch-zoom stay native, so the
+   only gestures the swipe handler has to deal with are horizontal ones */
+.single-lightbox,
+.slider-viewport,
+.slider-viewport img,
+.swiper-curated,
+.curated-single img{ touch-action:pan-y pinch-zoom; }
+
+.lightbox-info{
+  position:absolute; bottom:0; left:var(--gutter); right:var(--gutter);
+  display:flex; align-items:baseline; gap:18px;
+  padding-bottom:6px;
+}
+.lightbox-info__count{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+.lightbox-info__caption{ color:var(--muted); }
+
+.close-page{
+  display:none;
+  position:relative;
+  height:38px;
+  border-bottom:1px solid var(--rule);
+}
+.close-page__label{
+  position:absolute; left:var(--gutter); top:9px;
+  font-weight:600;
+}
+.close-page__label::before{ content:'\2190\00a0\00a0'; }
+
+@media (max-width:1023px){
+  .close-page{ display:block; }
+  /* the photo occupies a fixed 58vh stage and the caption flows underneath it,
+     inside the (auto-height) lightbox — so the caption is never pushed into the
+     overflow region and clipped away */
+  .lightbox-gallery{ height:auto; min-height:0; }
+  .single-lightbox{ position:relative; inset:auto; height:auto; padding-bottom:0; overflow:visible; }
+  .single-lightbox__img-wrap{ height:58vh; padding:9px var(--half) 0; }
+  /* the caption is a real in-flow block here, so it needs its own gutter (the
+     desktop rule used absolute left/right offsets, which do nothing once the
+     element is static) and a hairline to close the hero off from the
+     thumbnail strip below it */
+  .lightbox-info{
+    position:relative;
+    left:auto; right:auto;          /* the base rule's absolute offsets must not shift a relative box */
+    display:block;
+    padding:9px var(--gutter) 14px; /* on the same gutter as the title bar and the grid */
+  }
+  .lightbox-info::after{
+    content:'';
+    position:absolute;
+    left:var(--gutter); right:var(--gutter); bottom:0;
+    height:1px;
+    background:var(--rule);
+  }
+  .lightbox-info__count{ display:block; }
+  /* primary register: this is the photograph you are looking at, not a thumbnail label */
+  .lightbox-info__caption{ color:#000; }
+  .lightbox-nav{ width:22vw; top:0; bottom:auto; height:58vh; }
+}
+
+/* ==========================================================================
+   Biography / Contact
+   ========================================================================== */
+.article{ padding:0 var(--gutter) 60px; max-width:1440px; }
+.article__body{ max-width:66ch; }
+.article__body p{ margin:0 0 1.6em; }
+.article__lead{ font-size:15px; line-height:1.55; font-weight:500; letter-spacing:-.005em; }
+@media (min-width:1024px){
+  .article__body{ columns:2; column-gap:50px; max-width:none; }
+  .article__lead{ font-size:18px; line-height:1.45; }
+}
+.article h2{ font-size:12px; font-weight:700; margin:0 0 .6em; }
+.article__rule{ height:1px; background:var(--rule); margin:0 0 34px; }
+.article__rule--short{ width:2em; background:#d9d9d9; }
+
+/* One written piece (Essays & Reviews, Exhibitions & Talks, News). Unlike the
+   biography it stays a single measured column however wide the window is. */
+.post__meta{ color:var(--muted); margin:0 0 1.4em; }
+.post__back{ margin:34px 0 0; }
+.post__back a{
+  border-bottom:1px solid var(--rule);
+  transition:border-color 200ms linear, color 200ms linear;
+}
+.post__back a:hover{ border-bottom-color:#000; color:#000; }
+@media (min-width:1024px){
+  .post .article__body{ columns:1; max-width:66ch; }
+}
+
+.contact-columns{ display:block; font-size:12px; }
+.contact-col{ display:block; margin:0 0 27px; }
+.contact-col h2{ font-weight:700; margin:0 0 .4em; }
+.contact-col p{ color:var(--muted); }
+.contact-col a{ border-bottom:1px solid var(--rule); transition:border-color 200ms linear; }
+.contact-col a:hover{ border-bottom-color:#000; color:#000; }
+@media (min-width:768px){
+  .contact-columns{ display:flex; gap:var(--gutter); }
+  .contact-col{ width:25%; margin-bottom:0; }
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+.site-footer{ width:100%; color:var(--muted); }
+.site-footer__wrap{
+  position:relative;
+  border-top:1px solid var(--rule);
+  padding:13px 0;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+}
+.footer-newsletter{ display:flex; align-items:center; gap:18px; min-width:0; }
+.newsletter-form{ display:flex; align-items:center; gap:8px; }
+.footer-paragraph{ display:inline-block; vertical-align:middle; line-height:24px; margin:0 8px 0 0; }
+.site-footer a{ transition:color 200ms linear; }
+.site-footer a:hover{ color:#000; }
+.footer-social a + a{ margin-left:9px; }
+.newsletter-form fieldset{ display:flex; align-items:center; gap:8px; }
+.input--text{
+  width:190px;
+  border:0; border-bottom:1px solid var(--rule);
+  background:transparent;
+  padding:0 0 3px;
+  line-height:18px;
+  transition:border-color 200ms linear;
+}
+.input--text::placeholder{ color:var(--muted); }
+.input--text:focus{ outline:0; border-bottom-color:#000; }
+.input--button-blank{
+  border:0;                        /* reset the native button chrome: this is a text button */
+  background:transparent;
+  padding:0;
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  white-space:nowrap;
+}
+/* the wrap is a flex row: newsletter left, copyright hard against the right edge */
+.footer-copyright{ white-space:nowrap; margin-left:auto; text-align:right; }
+
+@media (max-width:1023px){
+  /* The footer prefers a single line: nothing here forces a break, and the
+     column gap tightens so even a 320px screen still fits. If it genuinely has
+     to wrap (e.g. the subscribe field is open) the two rows stay tight and the
+     wrap keeps the only top border — the copyright no longer draws its own. */
+  .site-footer__wrap{ padding:9px 0; flex-wrap:wrap; column-gap:12px; row-gap:6px; }
+  .footer-newsletter{ gap:18px; row-gap:4px; flex-wrap:wrap; }
+  .input--text{ width:140px; }
+  .footer-copyright{ margin-left:0; text-align:left; }
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+@keyframes rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+@keyframes reveal{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes slowFadeIn{ from{ opacity:0; } to{ opacity:1; } }
+.site-header--fade .nav-wrapper{ animation:slowFadeIn 900ms 1500ms both; }
+.swiper-curated__info{ animation:reveal 700ms 300ms both; }
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{ animation-duration:.001ms !important; animation-delay:0ms !important; transition-duration:.001ms !important; }
+}
+
+/* image that failed to load falls back to a generated plate */
+.is-fallback{ background-color:var(--plate); }

@@ -1,0 +1,36 @@
+# Bare-metal alternative to Docker: run the app as a systemd service behind Caddy.
+#
+#   sudo useradd --system --create-home --home-dir /srv/portfolio portfolio
+#   sudo -u portfolio git clone <your repo> /srv/portfolio
+#   cd /srv/portfolio && npm ci && npm --workspace web run build && npm run seed
+#   sudo cp deploy/portfolio.service /etc/systemd/system/
+#   sudo systemctl enable --now portfolio
+#
+# Create /srv/portfolio/.env from deploy/.env.example first, and point Caddy at
+# 127.0.0.1:8787 (see deploy/Caddyfile, replacing `app:8787` with the address).
+
+[Unit]
+Description=Portfolio — API and site
+Documentation=file:///srv/portfolio/docs/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=portfolio
+Group=portfolio
+WorkingDirectory=/srv/portfolio
+EnvironmentFile=/srv/portfolio/.env
+ExecStart=/usr/bin/node server/src/index.js
+Restart=always
+RestartSec=3
+
+# the database lives beside the checkout, on a path that survives deploys
+ReadWritePaths=/srv/portfolio/data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

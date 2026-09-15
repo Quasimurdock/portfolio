@@ -1,0 +1,18 @@
+# Keep the build context small — everything here is regenerated inside the image
+# or lives on a volume.
+node_modules
+**/node_modules
+web/dist
+server/data
+data
+
+.git
+.gitignore
+*.zip
+*.log
+
+# not needed at runtime
+docs
+legacy
+.vscode
+.idea

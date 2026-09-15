@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio</title>
+<meta name="description" content="Portfolio — a lightweight, single-file Vue rebuild of a photographer's studio site structure.">
+<meta name="theme-color" content="#ffffff">
+<!-- inline mark: black plate, white "P" (keeps the tab in the same monochrome key) -->
+<link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20fill='%23000'/%3E%3Ctext%20x='16'%20y='23'%20font-family='Helvetica,Arial'%20font-size='20'%20font-weight='700'%20fill='%23fff'%20text-anchor='middle'%3EP%3C/text%3E%3C/svg%3E">
+
+<!-- Typeface: Archivo (free grotesque, closest available stand-in for the reference site's
+     licensed "Univers Next W01"). The stack degrades to Helvetica / Arial if the CDN is
+     unreachable, so the layout never depends on the webfont. Loaded non-blocking. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap"></noscript>
+
+<style>
+/* ==========================================================================
+   Portfolio — single-file Vue 3 app
+   Structure replicated from nadavkander.com:
+     fixed header (title + 4-column nav)  >  header placeholder  >  mobile title
+     >  main content (feed slideshow | series grid | series lightbox | lists)
+     >  footer (subscribe + social + copyright)
+   Measured reference geometry is encoded directly in the rules below.
+   ========================================================================== */
+
+/* ---------- tokens ---------- */
+:root{
+  --ink:#000;
+  --paper:#fff;
+  --rule:#e6e6e6;
+  --rule-soft:#f0f0f0;
+  --muted:rgba(0,0,0,.5);
+  --plate:rgba(0,0,0,.075);       /* image placeholder grey */
+  --gutter:4vw;                    /* page side margin (grid-wrap) */
+  --half:2vw;                      /* half gutter (container--half-pad) */
+  --header-h:113px;                /* fixed header height, >=1024px */
+  --placeholder-h:77px;            /* spacer under the header */
+  --footer-h:52px;                 /* footer height — refined at runtime by script */
+  --feed-pad-top:50px;             /* studio-feed breathing space */
+  --feed-pad-bottom:164px;
+  --title-h:37px;                  /* page title bar height (9px padding + line + 9px) */
+  --title-gap:25px;                /* air between the page title bar and the content */
+  --title-mark-w:4px;              /* vertical marker left of the page title */
+  --title-mark-h:15px;
+  --title-mark-gap:9px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+}
+@media (min-width:1250px){
+  :root{ --gutter:50px; --half:25px; }   /* 4.16667em / 2.08333em at a 12px base */
+}
+@media (min-width:1024px){
+  :root{ --placeholder-h:var(--header-h); }
+}
+
+/* ---------- reset ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Archivo','Univers Next W01',Helvetica,'Helvetica Neue',Arial,sans-serif;
+  font-size:12px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+img{ border:0; max-width:100%; display:block; }
+a{ color:inherit; text-decoration:none; }
+button{ font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+h1,h2,h3,p,figure,fieldset{ margin:0; }
+fieldset{ border:0; padding:0; min-width:0; }
+ul{ margin:0; padding:0; list-style:none; }
+input{ font:inherit; color:inherit; }
+::selection{ background:#000; color:#fff; }
+:focus-visible{ outline:1px solid #000; outline-offset:2px; }
+
+.clear::after{ content:''; display:table; clear:both; }
+.container{ width:100%; padding:0 var(--gutter); }
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+.site-header{
+  position:fixed; top:0; left:0; width:100%;
+  z-index:15;
+  background:var(--paper);
+  -webkit-backface-visibility:hidden;
+  backface-visibility:hidden;
+  transform:translateZ(0);
+}
+.site-header__inner{ padding-bottom:0; }
+.site-header .wrapper{
+  position:relative;
+  padding:9px 0 45px;                       /* 0.5625rem 0 3.71667em */
+  border-bottom:1px solid transparent;
+  transition:border-color 150ms linear;
+}
+.site-header.is-scrolled .wrapper{ border-bottom-color:var(--rule); }
+
+.site-title{ font-weight:700; }
+.site-title a{ transition:opacity 200ms linear; }
+.site-title a:hover{ opacity:.55; }
+
+.nav-trigger{
+  display:none;
+  float:right;
+  position:relative;
+  z-index:10;
+  width:26px; height:19px;
+  background:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='25' height='17'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M0 .5h25M0 8.5h25M0 16.5h25'/%3E%3C/g%3E%3C/svg%3E") no-repeat 0 50%;
+  background-size:25px 17px;
+  border-radius:0;
+  transition:opacity 200ms linear;
+}
+.nav-trigger:hover{ opacity:.55; }
+.nav-trigger.is-open{
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='25' height='17'%3E%3Cg fill='none' stroke='%23000' stroke-width='1'%3E%3Cpath d='M1 1l23 15M24 1L1 16'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.site-nav ul{
+  margin:0; padding:0; list-style:none;
+  display:flex;
+  flex-flow:column wrap;                    /* fills 3 rows, then wraps into columns */
+  height:58px;
+  column-gap:50px;
+}
+.site-nav li{ display:block; white-space:nowrap; }
+.site-nav li.active{ font-weight:600; }
+.site-nav a{ display:block; transition:opacity 200ms linear; }
+.site-nav a:hover{ opacity:.5; }
+
+/* nav column behaviour (measured): 4 equal columns >=1250px, content-sized columns
+   distributed across the right half between 1024 and 1249px */
+@media (min-width:1024px){
+  .site-title{ position:absolute; left:0; top:9px; font-size:16.5px; line-height:1.25; }
+  .site-nav{ float:right; width:46vw; max-width:575px; padding-left:2vw; }
+}
+@media (min-width:1024px) and (max-width:1249px){
+  .site-nav ul{ justify-content:space-between; column-gap:2vw; }
+}
+@media (min-width:1250px){
+  .site-nav{ float:left; margin-left:50%; padding-left:25px; }
+}
+
+/* --- mobile / tablet: title bar + collapsible nav --- */
+@media (max-width:1023px){
+  .site-header .wrapper{ padding:9px 0 10px; }
+  .site-title{ float:left; position:relative; z-index:10; font-size:12px; line-height:1.6; }
+  .nav-trigger{ display:block; }
+  .nav-wrapper{
+    display:none;
+    clear:both;
+  }
+  .nav-wrapper.is-open{ display:block; animation:reveal 260ms var(--ease-out) both; }
+  .site-nav{ padding:9.8px 0; margin:0 var(--gutter); border-bottom:1px solid var(--rule); }
+  .site-nav ul{
+    display:block; height:auto;
+    column-count:2; column-gap:4vw;
+    margin:-.4rem 0;
+  }
+  .site-nav ul li{ break-inside:avoid; }
+  .site-nav a{ padding:.4rem 0; }
+  .site-title a, .site-nav a{ font-size:12px; }
+}
+
+.header-placeholder{ height:var(--placeholder-h); }
+
+/* ==========================================================================
+   Page title bar
+   The reference shows this band below 1024px only ("mobile-title"); here it
+   stays visible at every width so a page always announces itself.
+   ========================================================================== */
+.page-title{ display:block; width:100%; }
+.page-title__section{
+  position:relative;
+  padding:9px 0 9px calc(var(--title-mark-w) + var(--title-mark-gap));
+  font-weight:700;
+}
+/* a narrow vertical bar sits on the left alignment line, the title hangs beside it
+   (absolutely positioned, so the bar height stays 37px and the layout maths hold) */
+.page-title__section::before{
+  content:'';
+  position:absolute;
+  left:0; top:50%;
+  transform:translateY(-50%);
+  width:var(--title-mark-w);
+  height:var(--title-mark-h);
+  background:#000;
+}
+.page-title__section:empty{ display:none; }   /* the studio feed has no title */
+
+/* ==========================================================================
+   Content shell
+   ========================================================================== */
+.site-content{ position:relative; }
+/* only pages that actually show a title bar get the extra top space, so the
+   studio feed (which has no title) keeps its exact viewport-fitting height */
+.site-content.has-page-title{ padding-top:var(--title-gap); }
+
+/* Sticky footer: the page is at least one viewport tall and the footer is
+   pushed to the bottom of it, so a short page never leaves the footer stranded
+   in the middle of the screen. The studio feed is excluded — it pins its own
+   footer and sizes its stage for the viewport itself, so stretching its main
+   region would push the count/caption line under that fixed footer. */
+.site{
+  display:flex;
+  flex-direction:column;
+  min-height:100vh;
+  min-height:100dvh;
+}
+.load-content{
+  display:flex;
+  flex-direction:column;
+  flex:1 1 auto;
+}
+.site-content{ flex:1 0 auto; }        /* absorb the leftover height */
+.is-feed .site-content{ flex:0 0 auto; }
+.site-footer{ margin-top:auto; }       /* and hold the footer down */
+
+/* ==========================================================================
+   Slider — a three-slide window (prev / current / next) that follows the
+   finger and snaps. Used by the studio feed and the series lightbox.
+   ========================================================================== */
+.slider-viewport{ position:relative; width:100%; height:100%; overflow:hidden; }
+.slider-track{
+  display:flex;
+  height:100%;
+  width:calc(100% * var(--slide-count, 3));
+  will-change:transform;
+  backface-visibility:hidden;
+}
+.slider-slide{
+  flex:0 0 calc(100% / var(--slide-count, 3));
+  height:100%;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* ==========================================================================
+   Grids (series index pages, series thumbnails, list pages, monographs)
+   ========================================================================== */
+.grid-wrap{ margin:0 var(--gutter); overflow:hidden; }
+.image-grid{ margin:0 calc(-1 * var(--gutter)); }
+.container--half-pad{ padding:0 var(--half); }
+
+.grid-single{
+  display:inline-block;
+  vertical-align:top;
+  width:100%;
+  margin:0 0 var(--gutter);
+}
+.grid-single__inner{
+  display:block;
+  position:relative;
+  margin:0 var(--half);
+}
+.grid-single__img-wrap{ position:relative; overflow:hidden; }
+
+/* aspect-ratio box (padding-bottom 130%) with a grey plate until the image arrives */
+.grid-single__img{
+  position:relative;
+  padding-bottom:130%;
+  background-color:var(--plate);
+  background-size:cover;
+  background-position:50% 50%;
+  background-repeat:no-repeat;
+}
+.grid-single__img::after{
+  content:'';
+  position:absolute; inset:0;
+  background-image:inherit;               /* inherits the URL the loader sets */
+  background-size:cover;
+  background-position:50% 50%;
+  background-repeat:no-repeat;
+  opacity:0;
+  transition:opacity 700ms var(--ease);
+}
+.grid-single__img.is-loaded::after{ opacity:1; }
+/* while a photograph is in flight the plate breathes, so a slow connection reads
+   as "loading" rather than "broken" */
+.grid-single__img.is-loading{ animation:platePulse 1.8s ease-in-out infinite; }
+@keyframes platePulse{
+  0%,100%{ background-color:rgba(0,0,0,.055); }
+  50%{ background-color:rgba(0,0,0,.115); }
+}
+.grid-single__caption{ margin:9px 0; line-height:1.6; }
+@media (min-width:400px){
+  .grid-single__caption{ margin:9px 0 27px; }   /* 3-line caption rhythm, as measured */
+}
+.grid-single__caption strong{ font-weight:700; }
+.grid-single__meta{ color:var(--muted); }
+
+/* hover: the reference darkens nothing, it simply lets the work breathe */
+@media (hover:hover){
+  .grid-single__inner:hover .grid-single__img::after{ opacity:.92; }
+  .grid-single__inner:hover .grid-single__caption strong{ text-decoration:underline; text-underline-offset:2px; }
+}
+.grid-single__inner:focus-visible{ outline:1px solid #000; outline-offset:4px; }
+
+/* staggered entrance for grid cards */
+.grid-single{ animation:rise 620ms var(--ease-out) both; animation-delay:calc(min(var(--i,0),11) * 45ms); }
+
+@media (min-width:400px){ .grid-single{ width:50%; } }
+@media (min-width:768px){ .grid-single{ width:33.3333%; } }
+@media (min-width:1024px){
+  .grid-single{ width:25%; margin-bottom:50px; }
+}
+
+/* Series thumbnails — deliberately a smaller, denser register than the hero
+   above them, at every width, so a thumbnail never reads as another hero frame.
+   (The generic grid widths would leave one full-width column on phones, making
+   each thumbnail almost the size of the photograph itself.) */
+.image-grid--thumbs{ padding-top:24px; }
+.image-grid--thumbs .grid-single{ width:33.3333%; margin-bottom:9px; }
+.image-grid--thumbs .grid-single__caption{ font-size:11px; color:var(--muted); margin:9px 0; }
+.image-grid--thumbs .grid-single.is-active .grid-single__img{
+  outline:1px solid #000;
+  outline-offset:-4px;
+}
+.image-grid--thumbs .grid-single.is-active .grid-single__caption{ color:#000; }
+@media (max-width:479px){
+  .image-grid--thumbs .grid-single{ width:50%; }        /* two up on small phones */
+}
+@media (min-width:1024px){
+  .image-grid--thumbs{ padding-top:50px; }
+  .image-grid--thumbs .grid-single{ width:16.6667%; }  /* six up on desktop */
+}
+
+/* bordered list pages (News / Exhibitions / Essays & Reviews) */
+.grid-single--list .grid-single__inner{
+  border-top:1px solid var(--rule);
+  padding-top:9px;
+  min-height:100%;
+}
+.grid-single--list .grid-single__caption{ margin:0 0 27px; }
+@media (min-width:1024px){ .grid-single--list{ width:33.3333%; } }
+
+/* film cards */
+.film-card .grid-single__img{ padding-bottom:56.25%; }
+.film-card .play{
+  position:absolute; inset:0; margin:auto;
+  width:38px; height:38px;
+  border:1px solid rgba(255,255,255,.85);
+  border-radius:50%;
+  background:rgba(0,0,0,.25);
+  z-index:2;
+  transition:transform 300ms var(--ease), background 300ms linear;
+}
+.film-card .play::after{
+  content:''; position:absolute; inset:0; margin:auto;
+  width:0; height:0;
+  border-left:10px solid #fff;
+  border-top:6px solid transparent;
+  border-bottom:6px solid transparent;
+  transform:translateX(2px);
+}
+.film-card .grid-single__inner:hover .play{ transform:scale(1.08); background:rgba(0,0,0,.45); }
+
+/* ==========================================================================
+   Studio feed (home) — full-viewport slideshow with a count + caption line
+   ========================================================================== */
+.site-content--feed{ padding:var(--feed-pad-top) 0 var(--feed-pad-bottom); }
+.swiper-curated{
+  position:relative;
+  /* the stage fills exactly what is left between header, info line and the pinned footer */
+  height:calc(100vh - var(--placeholder-h) - var(--feed-pad-top) - var(--feed-pad-bottom) - var(--footer-h));
+  height:calc(100dvh - var(--placeholder-h) - var(--feed-pad-top) - var(--feed-pad-bottom) - var(--footer-h));
+  min-height:240px;
+  opacity:0;
+  transition:opacity 700ms var(--ease);
+}
+.swiper-curated.is-ready{ opacity:1; }
+.curated-wrap{
+  position:relative;
+  height:100%;
+  padding:0 var(--half);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.curated-col{ display:flex; align-items:center; justify-content:center; height:100%; width:100%; }
+.curated-single{
+  display:flex; align-items:center; justify-content:center;
+  height:100%; width:100%;
+}
+.curated-single img{
+  max-width:100%;
+  max-height:100%;
+  width:auto; height:auto;
+  object-fit:contain;
+}
+.curated-nav{
+  position:absolute; top:0; bottom:0;
+  width:14vw; max-width:160px;
+  z-index:2;
+  opacity:0;
+  transition:opacity 250ms linear;
+}
+.curated-nav::after{
+  content:''; position:absolute; top:50%; left:50%;
+  width:9px; height:9px;
+  border-top:1px solid #000; border-right:1px solid #000;
+}
+.curated-nav--prev{ left:0; }
+.curated-nav--prev::after{ transform:translate(-50%,-50%) rotate(-135deg); }
+.curated-nav--next{ right:0; }
+.curated-nav--next::after{ transform:translate(-50%,-50%) rotate(45deg); }
+.swiper-curated:hover .curated-nav{ opacity:.35; }
+.curated-nav:hover{ opacity:1 !important; }
+
+.swiper-curated__info{
+  position:absolute;
+  bottom:0; left:var(--gutter); right:var(--gutter);
+  padding:0 0 9px;
+  display:flex;
+  align-items:baseline;
+}
+.swiper-curated__count{ display:inline-block; margin:0 1.5em 0 0; font-variant-numeric:tabular-nums; }
+.swiper-curated__caption{ display:none; color:var(--muted); }
+@media (min-width:1024px){ .swiper-curated__caption{ display:inline-block; } }
+
+/* feed keeps the footer pinned, exactly like the reference */
+.is-feed .site-footer{ position:fixed; bottom:0; left:0; width:100%; background:var(--paper); z-index:12; }
+@media (max-width:1023px){
+  :root{ --feed-pad-top:24px; --feed-pad-bottom:120px; --footer-h:90px; }
+}
+
+/* ==========================================================================
+   Series (lightbox hero + thumbnail strip)
+   ========================================================================== */
+.lightbox-gallery{
+  position:relative;
+  /* 184px = header band + slack (reference value); the title bar and its gap are
+     then discounted so title area + hero still fill the first screen as the
+     reference's 716px hero does */
+  height:calc(100vh - 184px - var(--title-h) - var(--title-gap));
+  height:calc(100dvh - 184px - var(--title-h) - var(--title-gap));
+  min-height:360px;
+}
+.single-lightbox{
+  position:absolute; inset:0;
+  padding-bottom:31.25px;
+  overflow:hidden;
+}
+.single-lightbox__img-wrap{
+  position:relative;
+  height:100%;
+  padding:0 var(--gutter);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.single-lightbox__img-wrap img{
+  max-width:100%;
+  max-height:100%;
+  width:auto; height:auto;
+  object-fit:contain;
+  opacity:0;
+  transition:opacity 600ms var(--ease);
+}
+.single-lightbox__img-wrap img.is-loaded{ opacity:1; }
+
+.lightbox-nav{
+  position:absolute; top:0; bottom:0; width:12vw; max-width:150px; z-index:2;
+  opacity:0; transition:opacity 250ms linear;
+}
+.lightbox-nav::after{
+  content:''; position:absolute; top:50%; left:50%;
+  width:10px; height:10px;
+  border-top:1px solid #000; border-right:1px solid #000;
+}
+.lightbox-nav--prev{ left:0; }
+.lightbox-nav--prev::after{ transform:translate(-50%,-50%) rotate(-135deg); }
+.lightbox-nav--next{ right:0; }
+.lightbox-nav--next::after{ transform:translate(-50%,-50%) rotate(45deg); }
+.lightbox-gallery:hover .lightbox-nav{ opacity:.35; }
+.lightbox-nav:hover{ opacity:1; }
+
+/* touch behaviour: vertical page scrolling and pinch-zoom stay native, so the
+   only gestures the swipe handler has to deal with are horizontal ones */
+.single-lightbox,
+.slider-viewport,
+.slider-viewport img,
+.swiper-curated,
+.curated-single img{ touch-action:pan-y pinch-zoom; }
+
+.lightbox-info{
+  position:absolute; bottom:0; left:var(--gutter); right:var(--gutter);
+  display:flex; align-items:baseline; gap:18px;
+  padding-bottom:6px;
+}
+.lightbox-info__count{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+.lightbox-info__caption{ color:var(--muted); }
+
+.close-page{
+  display:none;
+  position:relative;
+  height:38px;
+  border-bottom:1px solid var(--rule);
+}
+.close-page__label{
+  position:absolute; left:var(--gutter); top:9px;
+  font-weight:600;
+}
+.close-page__label::before{ content:'\2190\00a0\00a0'; }
+
+@media (max-width:1023px){
+  .close-page{ display:block; }
+  /* the photo occupies a fixed 58vh stage and the caption flows underneath it,
+     inside the (auto-height) lightbox — so the caption is never pushed into the
+     overflow region and clipped away */
+  .lightbox-gallery{ height:auto; min-height:0; }
+  .single-lightbox{ position:relative; inset:auto; height:auto; padding-bottom:0; overflow:visible; }
+  .single-lightbox__img-wrap{ height:58vh; padding:9px var(--half) 0; }
+  /* the caption is a real in-flow block here, so it needs its own gutter (the
+     desktop rule used absolute left/right offsets, which do nothing once the
+     element is static) and a hairline to close the hero off from the
+     thumbnail strip below it */
+  .lightbox-info{
+    position:relative;
+    left:auto; right:auto;          /* the base rule's absolute offsets must not shift a relative box */
+    display:block;
+    padding:9px var(--gutter) 14px; /* on the same gutter as the title bar and the grid */
+  }
+  .lightbox-info::after{
+    content:'';
+    position:absolute;
+    left:var(--gutter); right:var(--gutter); bottom:0;
+    height:1px;
+    background:var(--rule);
+  }
+  .lightbox-info__count{ display:block; }
+  /* primary register: this is the photograph you are looking at, not a thumbnail label */
+  .lightbox-info__caption{ color:#000; }
+  .lightbox-nav{ width:22vw; top:0; bottom:auto; height:58vh; }
+}
+
+/* ==========================================================================
+   Biography / Contact
+   ========================================================================== */
+.article{ padding:0 var(--gutter) 60px; max-width:1440px; }
+.article__body{ max-width:66ch; }
+.article__body p{ margin:0 0 1.6em; }
+.article__lead{ font-size:15px; line-height:1.55; font-weight:500; letter-spacing:-.005em; }
+@media (min-width:1024px){
+  .article__body{ columns:2; column-gap:50px; max-width:none; }
+  .article__lead{ font-size:18px; line-height:1.45; }
+}
+.article h2{ font-size:12px; font-weight:700; margin:0 0 .6em; }
+.article__rule{ height:1px; background:var(--rule); margin:0 0 34px; }
+.article__rule--short{ width:2em; background:#d9d9d9; }
+
+/* One written piece (Essays & Reviews, Exhibitions & Talks, News). Unlike the
+   biography it stays a single measured column however wide the window is. */
+.post__meta{ color:var(--muted); margin:0 0 1.4em; }
+.post__back{ margin:34px 0 0; }
+.post__back a{
+  border-bottom:1px solid var(--rule);
+  transition:border-color 200ms linear, color 200ms linear;
+}
+.post__back a:hover{ border-bottom-color:#000; color:#000; }
+@media (min-width:1024px){
+  .post .article__body{ columns:1; max-width:66ch; }
+}
+
+.contact-columns{ display:block; font-size:12px; }
+.contact-col{ display:block; margin:0 0 27px; }
+.contact-col h2{ font-weight:700; margin:0 0 .4em; }
+.contact-col p{ color:var(--muted); }
+.contact-col a{ border-bottom:1px solid var(--rule); transition:border-color 200ms linear; }
+.contact-col a:hover{ border-bottom-color:#000; color:#000; }
+@media (min-width:768px){
+  .contact-columns{ display:flex; gap:var(--gutter); }
+  .contact-col{ width:25%; margin-bottom:0; }
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+.site-footer{ width:100%; color:var(--muted); }
+.site-footer__wrap{
+  position:relative;
+  border-top:1px solid var(--rule);
+  padding:13px 0;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:18px;
+}
+.footer-newsletter{ display:flex; align-items:center; gap:18px; min-width:0; }
+.newsletter-form{ display:flex; align-items:center; gap:8px; }
+.footer-paragraph{ display:inline-block; vertical-align:middle; line-height:24px; margin:0 8px 0 0; }
+.site-footer a{ transition:color 200ms linear; }
+.site-footer a:hover{ color:#000; }
+.footer-social a + a{ margin-left:9px; }
+.newsletter-form fieldset{ display:flex; align-items:center; gap:8px; }
+.input--text{
+  width:190px;
+  border:0; border-bottom:1px solid var(--rule);
+  background:transparent;
+  padding:0 0 3px;
+  line-height:18px;
+  transition:border-color 200ms linear;
+}
+.input--text::placeholder{ color:var(--muted); }
+.input--text:focus{ outline:0; border-bottom-color:#000; }
+.input--button-blank{
+  border:0;                        /* reset the native button chrome: this is a text button */
+  background:transparent;
+  padding:0;
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  white-space:nowrap;
+}
+/* the wrap is a flex row: newsletter left, copyright hard against the right edge */
+.footer-copyright{ white-space:nowrap; margin-left:auto; text-align:right; }
+
+@media (max-width:1023px){
+  /* The footer prefers a single line: nothing here forces a break, and the
+     column gap tightens so even a 320px screen still fits. If it genuinely has
+     to wrap (e.g. the subscribe field is open) the two rows stay tight and the
+     wrap keeps the only top border — the copyright no longer draws its own. */
+  .site-footer__wrap{ padding:9px 0; flex-wrap:wrap; column-gap:12px; row-gap:6px; }
+  .footer-newsletter{ gap:18px; row-gap:4px; flex-wrap:wrap; }
+  .input--text{ width:140px; }
+  .footer-copyright{ margin-left:0; text-align:left; }
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+@keyframes rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+@keyframes reveal{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes slowFadeIn{ from{ opacity:0; } to{ opacity:1; } }
+.site-header--fade .nav-wrapper{ animation:slowFadeIn 900ms 1500ms both; }
+.swiper-curated__info{ animation:reveal 700ms 300ms both; }
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{ animation-duration:.001ms !important; animation-delay:0ms !important; transition-duration:.001ms !important; }
+}
+
+/* image that failed to load falls back to a generated plate */
+.is-fallback{ background-color:var(--plate); }
+
+/* no-Vue notice */
+.no-vue #app{ display:none; }
+.boot-error{
+  padding:48px var(--gutter);
+  font-size:14px; line-height:1.6;
+  max-width:60ch;
+}
+.boot-error code{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+</style>
+</head>
+
+<body>
+<div id="app">
+ <div class="site" :class="rootClass">
+  <!-- ===================== header ===================== -->
+  <header class="site-header" :class="{ 'is-scrolled': scrolled, 'site-header--fade': isFeed }" role="banner">
+    <div class="container">
+      <div class="site-header__inner">
+        <div class="wrapper clear">
+          <div class="nav-bar-wrapper clear">
+            <div class="site-title"><a href="#/" @click="closeNav">Portfolio</a></div>
+            <button class="nav-trigger"
+                    type="button"
+                    :class="{ 'is-open': navOpen }"
+                    :aria-expanded="String(navOpen)"
+                    aria-controls="site-nav"
+                    aria-label="Toggle navigation"
+                    @click="navOpen = !navOpen"></button>
+          </div>
+          <div class="nav-wrapper clear" :class="{ 'is-open': navOpen }">
+            <nav class="site-nav" id="site-nav" role="navigation" aria-label="Primary">
+              <ul>
+                <li v-for="item in nav" :key="item.path" :class="{ active: isActive(item.path) }">
+                  <a :href="'#' + item.path" @click="closeNav">{{ item.label }}</a>
+                </li>
+              </ul>
+            </nav>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="header-placeholder"></div>
+
+  <div class="load-content">
+    <!-- ================= page title bar ================= -->
+    <div class="page-title">
+      <div class="container">
+        <div class="page-title__section">{{ sectionTitle }}</div>
+      </div>
+    </div>
+
+    <!-- ===================== main ===================== -->
+    <main class="site-content"
+          :class="[contentClass, { 'has-page-title': !!sectionTitle }]"
+          id="content" role="main" :key="viewKey">
+
+      <!-- ---------- Studio feed ---------- -->
+      <template v-if="view.kind === 'feed'">
+        <div class="swiper-curated__info">
+          <span class="swiper-curated__count">{{ pad(feedIndex + 1) }} / {{ pad(feedItems.length) }}</span>
+          <span class="swiper-curated__caption">{{ currentFeed.caption }}</span>
+        </div>
+        <div class="swiper-curated" :class="{ 'is-ready': currentFeed }"
+             @touchstart.passive="sliderStart"
+             @touchmove.passive="sliderMove"
+             @touchend="sliderEnd"
+             @touchcancel="sliderEnd">
+          <div class="curated-wrap">
+            <div class="curated-col">
+              <div class="slider-viewport" ref="viewport">
+                <div class="slider-track" :style="trackStyle">
+                  <div class="slider-slide" v-for="s in slides" :key="s.key">
+                    <a class="curated-single" :href="'#' + s.item.path" :aria-label="s.item.caption">
+                      <img v-lazy="{ key: 'feed-' + s.item.key, src: s.item.src, srcset: s.item.srcset, sizes: imageSizes, ratio: s.item.ratio }"
+                           :alt="s.item.caption"
+                           loading="lazy"
+                           decoding="async">
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="curated-nav curated-nav--prev" type="button" aria-label="Previous" @click="feedPrev"></button>
+          <button class="curated-nav curated-nav--next" type="button" aria-label="Next" @click="feedNext"></button>
+        </div>
+      </template>
+
+      <!-- ---------- Series index (grid of works) ---------- -->
+      <template v-else-if="view.kind === 'grid'">
+        <div class="grid-wrap">
+          <div class="image-grid image-grid--4x-portrait">
+            <div class="container container--half-pad">
+              <div v-for="(s, i) in view.items"
+                   class="grid-single grid-single--bordered grid-single--portrait"
+                   :class="{ 'film-card': view.film }"
+                   :key="s.slug"
+                   :style="{ '--i': i }">
+                <a class="grid-single__inner" :href="'#' + view.path + '/' + s.slug">
+                  <div class="grid-single__img-wrap">
+                    <div class="grid-single__img"
+                         v-lazy="{ key: 'thumb-' + s.seed, bg: s.thumb, ratio: 1.3 }"></div>
+                    <span v-if="view.film" class="play" aria-hidden="true"></span>
+                  </div>
+                  <div class="grid-single__caption caption-project">
+                    <strong>{{ s.title }}</strong><br>
+                    <span class="grid-single__meta">{{ s.meta }}</span>
+                  </div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ---------- Series detail: lightbox hero + thumbnails ---------- -->
+      <template v-else-if="view.kind === 'series'">
+        <a class="close-page" :href="'#' + view.sectionPath" aria-label="Back to section">
+          <span class="close-page__label">{{ view.sectionTitle }}</span>
+        </a>
+
+        <div class="lightbox-gallery">
+          <div class="single-lightbox"
+               @touchstart.passive="sliderStart"
+               @touchmove.passive="sliderMove"
+               @touchend="sliderEnd"
+               @touchcancel="sliderEnd">
+            <div class="single-lightbox__img-wrap">
+              <div class="slider-viewport" ref="viewport">
+                <div class="slider-track" :style="trackStyle">
+                  <div class="slider-slide" v-for="s in slides" :key="s.key">
+                    <img v-lazy="{ key: 'lb-' + s.item.key, src: s.item.src, srcset: s.item.srcset, sizes: imageSizes, ratio: s.item.ratio }"
+                         :alt="s.item.caption"
+                         loading="lazy"
+                         decoding="async">
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="lightbox-nav lightbox-nav--prev" type="button" aria-label="Previous image" @click="seriesPrev"></button>
+            <button class="lightbox-nav lightbox-nav--next" type="button" aria-label="Next image" @click="seriesNext"></button>
+            <div class="lightbox-info">
+              <span class="lightbox-info__count">{{ pad(seriesIndex + 1) }} / {{ pad(images.length) }}</span>
+              <span class="lightbox-info__caption">{{ currentImage.caption }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-wrap">
+          <div class="image-grid image-grid--thumbs">
+            <div class="container container--half-pad">
+              <div v-for="(img, i) in images"
+                   class="grid-single"
+                   :class="{ 'is-active': i === seriesIndex }"
+                   :key="img.key"
+                   :style="{ '--i': i }">
+                <a class="grid-single__inner" :href="'#' + route + '/i/' + (i + 1)" @click.prevent="selectImage(i)">
+                  <div class="grid-single__img-wrap">
+                    <div class="grid-single__img"
+                         v-lazy="{ key: 'st-' + img.key, bg: img.thumb, ratio: 1.3 }"></div>
+                  </div>
+                  <div class="grid-single__caption">
+                    <strong>{{ view.series.title }}</strong><br>
+                    <span class="grid-single__meta">{{ img.caption }}</span>
+                  </div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ---------- List pages (Essays & Reviews / Exhibitions & Talks / News) ---------- -->
+      <template v-else-if="view.kind === 'list'">
+        <div class="grid-wrap">
+          <div class="image-grid">
+            <div class="container container--half-pad">
+              <div v-for="(item, i) in view.items"
+                   class="grid-single grid-single--list"
+                   :key="item.slug"
+                   :style="{ '--i': i }">
+                <a class="grid-single__inner" :href="'#' + item.path">
+                  <div class="grid-single__caption">
+                    <strong>{{ item.title }}</strong><br>
+                    <span class="grid-single__meta">{{ item.meta }}</span>
+                  </div>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ---------- One written piece (an item of a list section) ---------- -->
+      <template v-else-if="view.kind === 'post'">
+        <article class="article post">
+          <div class="article__rule article__rule--short"></div>
+          <p class="post__meta">{{ view.item.meta }}</p>
+          <div class="article__body">
+            <p class="article__lead">{{ view.item.body[0] }}</p>
+            <p v-for="(para, i) in view.item.body.slice(1)" :key="i">{{ para }}</p>
+          </div>
+          <p class="post__back">
+            <a :href="'#' + view.sectionPath">←&nbsp;{{ view.sectionTitle }}</a>
+          </p>
+        </article>
+      </template>
+
+      <!-- ---------- Biography ---------- -->
+      <template v-else-if="view.kind === 'article'">
+        <article class="article">
+          <div class="article__rule article__rule--short"></div>
+          <div class="article__body">
+            <p class="article__lead">{{ view.lead }}</p>
+            <p v-for="(para, i) in view.paragraphs" :key="i">{{ para }}</p>
+            <h2>Selected publications</h2>
+            <p>{{ view.publications }}</p>
+            <h2>Representation</h2>
+            <p>{{ view.representation }}</p>
+          </div>
+        </article>
+      </template>
+
+      <!-- ---------- Contact ---------- -->
+      <template v-else-if="view.kind === 'contact'">
+        <div class="grid-wrap">
+          <div class="container container--half-pad">
+            <div class="article__rule article__rule--short"></div>
+            <div class="contact-columns">
+              <div class="contact-col" v-for="col in view.columns" :key="col.title">
+                <h2>{{ col.title }}</h2>
+                <p v-for="(line, i) in col.lines" :key="i">
+                  <a v-if="line.href" :href="line.href" :target="line.external ? '_blank' : null" rel="noopener">{{ line.text }}</a>
+                  <template v-else>{{ line.text }}</template>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ---------- 404 ---------- -->
+      <template v-else>
+        <div class="grid-wrap">
+          <div class="container container--half-pad">
+            <div class="article__rule article__rule--short"></div>
+            <div class="article__body" style="padding-top:9px">
+              <p class="article__lead">Not found.</p>
+              <p>The page <code>{{ route }}</code> does not exist in this portfolio. Use the navigation above to browse the work.</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </main>
+
+    <!-- ===================== footer ===================== -->
+    <footer class="site-footer" role="contentinfo">
+      <div class="container">
+        <div class="site-footer__wrap">
+          <div class="footer-newsletter">
+            <form class="newsletter-form" @submit.prevent="subscribe" novalidate>
+              <p class="footer-paragraph">
+                <a href="#" class="js-footer-toggle" @click.prevent="footerOpen = !footerOpen"
+                   :aria-expanded="String(footerOpen)">Subscribe</a>
+              </p>
+              <fieldset v-if="footerOpen">
+                <input type="email" class="input--text" name="subscriber_email" v-model="email"
+                       placeholder="Enter your email address" aria-label="Email address">
+                <input type="submit" class="input--button-blank newsletter-submit" value="Submit">
+              </fieldset>
+              <p class="footer-paragraph" v-if="subscribed">Thank you — please confirm by email.</p>
+            </form>
+            <div class="footer-social">
+              <p class="footer-paragraph">
+                <a href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a>
+                <a href="https://twitter.com/" target="_blank" rel="noopener">Twitter</a>
+              </p>
+            </div>
+          </div>
+          <div class="footer-copyright"><p class="footer-paragraph">&copy; {{ year }} Portfolio</p></div>
+        </div>
+      </div>
+    </footer>
+  </div>
+ </div>
+</div>
+
+<!-- =====================================================================
+     Vue 3 global (production) build.
+     Local vendor copy first (instant, works offline), then two CDNs as a
+     fallback so the file still runs when copied out on its own.
+     The app itself is the single inline script block at the bottom.
+     ===================================================================== -->
+<script src="vendor/vue.global.prod.js"></script>
+<script>if (!window.Vue) document.write('<script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"><\/script>');</script>
+<script>if (!window.Vue) document.write('<script src="https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js"><\/script>');</script>
+
+<script>
+/* ==========================================================================
+   Portfolio — application script (single file, no build step)
+   --------------------------------------------------------------------------
+   Content is generated locally so the demo is self-contained. Photographs
+   come from picsum.photos (seeded, greyscale) purely as placeholders — swap
+   `photo()` / `photoSet()` for your own image URLs and nothing else changes.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  if (!window.Vue) {
+    document.documentElement.classList.add('no-vue');
+    var notice = document.createElement('div');
+    notice.className = 'boot-error';
+    notice.innerHTML = '<h1>Portfolio</h1><p>Vue 3 could not be loaded — neither the local ' +
+      '<code>vendor/vue.global.prod.js</code> copy nor the CDN responded. Check the network or ' +
+      'restore that file, then reload.</p>';
+    document.body.appendChild(notice);
+    return;
+  }
+
+  var MIN = Math.min;
+
+  /* ------------------------------------------------------------------ *
+   * 1. Imagery helpers
+   * ------------------------------------------------------------------ */
+  var PHOTO_BASE = 'https://picsum.photos/seed/';
+  var PHOTO_WIDTHS = [480, 960, 1440];
+
+  /** Single placeholder photograph. `ratio` = height / width. */
+  function photo(seed, width, ratio) {
+    return PHOTO_BASE + encodeURIComponent(seed) + '/' + width + '/' + Math.round(width * ratio) + '?grayscale';
+  }
+  /** Responsive candidate list so the browser picks a sensible file size. */
+  function photoSet(seed, ratio) {
+    return PHOTO_WIDTHS.map(function (w) { return photo(seed, w, ratio) + ' ' + w + 'w'; }).join(', ');
+  }
+
+  /** Deterministic hash, used for seeds and for the generated fallback plates. */
+  function hash(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 16777619) >>> 0; }
+    return h >>> 0;
+  }
+
+  /** A generated "unexposed plate" used when a photograph cannot be fetched
+      (offline, blocked CDN). Keeps the layout looking intentional. */
+  function plate(seed, ratio) {
+    var h = 900, w = Math.round(h / (ratio || 1.3));
+    var r = hash(String(seed));
+    var shade = 210 + (r % 28);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0" stop-color="#f7f7f7"/><stop offset="1" stop-color="rgb(' + shade + ',' + shade + ',' + shade + ')"/>' +
+      '</linearGradient></defs>' +
+      '<rect width="' + w + '" height="' + h + '" fill="url(#g)"/>' +
+      '<g stroke="rgba(0,0,0,.06)">' +
+      '<path d="M0 ' + (h * 0.5).toFixed(0) + 'H' + w + 'M' + (w * 0.5).toFixed(0) + ' 0V' + h + '"/>' +
+      '<path d="M' + (w / 2 - 16) + ' ' + (h / 2) + 'h32M' + (w / 2) + ' ' + (h / 2 - 16) + 'v32" stroke="rgba(0,0,0,.18)"/>' +
+      '</g></svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 2. Lazy loader — IntersectionObserver, srcset aware, background aware
+   *    • only the placeholder plate is painted until an element comes
+   *      within 800px of the viewport
+   *    • <img> gets src/srcset/sizes assigned; a div gets background-image
+   *    • one retry on failure, then a generated plate
+   *    • degrades to eager loading when IntersectionObserver is missing
+   * ------------------------------------------------------------------ */
+  var stats = Vue.reactive({ loaded: 0, total: 0, failed: 0 });
+
+  var lazy = (function () {
+    var supported = typeof window.IntersectionObserver === 'function';
+    var registry = new Map();          /* element -> config */
+    var observer = null;
+
+    /* the footer counter always describes what is mounted right now */
+    function refresh() {
+      var total = 0, loaded = 0, failed = 0;
+      registry.forEach(function (cfg, el) {
+        total++;
+        if (el.dataset.lazyState === 'done') loaded++;
+        else if (el.dataset.lazyState === 'failed') failed++;
+      });
+      stats.total = total;
+      stats.loaded = loaded;
+      stats.failed = failed;
+    }
+
+    function ensureObserver() {
+      if (observer || !supported) return observer;
+      observer = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i];
+          if (!entry.isIntersecting) continue;
+          observer.unobserve(entry.target);
+          hydrate(entry.target);
+        }
+      }, { root: null, rootMargin: '800px 0px', threshold: 0.01 });
+      return observer;
+    }
+
+    function observe(el, cfg) {
+      if (!el || !cfg || (!cfg.src && !cfg.bg)) return;
+      var previous = registry.get(el);
+      if (previous && previous.key === cfg.key && el.dataset.lazyState) return; /* already handled */
+      registry.set(el, cfg);
+      el.classList.add('is-loading');
+
+      if (!supported) { hydrate(el); return; }         /* eager fallback */
+      ensureObserver().observe(el);
+      refresh();
+    }
+
+    function release(el) {
+      if (observer) observer.unobserve(el);
+      registry.delete(el);
+      refresh();
+    }
+
+    function markDone(el) {
+      if (el.__lazyTimer) { clearTimeout(el.__lazyTimer); el.__lazyTimer = null; }
+      el.dataset.lazyState = 'done';
+      el.classList.remove('is-loading');
+      el.classList.add('is-loaded');
+      refresh();
+    }
+
+    function markFailed(el, cfg) {
+      if (el.__lazyTimer) { clearTimeout(el.__lazyTimer); el.__lazyTimer = null; }
+      el.dataset.lazyState = 'failed';
+      el.classList.remove('is-loading');
+      el.classList.add('is-fallback');
+      var src = plate(cfg.key || cfg.src || cfg.bg, cfg.ratio);
+      if (cfg.bg) { el.style.backgroundImage = 'url("' + src + '")'; el.classList.add('is-loaded'); }
+      else {
+        el.removeAttribute('srcset');
+        el.removeAttribute('sizes');
+        el.src = src;
+        el.classList.add('is-loaded');
+      }
+      refresh();
+    }
+
+    function assignImage(el, cfg) {
+      if (cfg.sizes) el.sizes = cfg.sizes;
+      if (cfg.srcset) el.srcset = cfg.srcset;
+      el.src = cfg.src;
+    }
+
+    function hydrate(el) {
+      var cfg = registry.get(el);
+      if (!cfg) return;
+      var state = el.dataset.lazyState;
+      if (state === 'loading' || state === 'done' || state === 'failed') return;
+      el.dataset.lazyState = 'loading';
+
+      /* never leave a plate pulsing forever: after 15s show the generated plate
+         instead. If the real photograph still arrives later it takes over. */
+      el.__lazyTimer = setTimeout(function () {
+        if (el.dataset.lazyState === 'loading') markFailed(el, cfg);
+      }, 15000);
+
+      if (cfg.bg) {
+        /* background images: preload through an Image() so we never flash.
+           one retry, then the generated plate. */
+        var attempt = function () {
+          var probe = new Image();
+          probe.decoding = 'async';
+          probe.onload = function () { el.style.backgroundImage = 'url("' + cfg.bg + '")'; markDone(el); };
+          probe.onerror = function () {
+            if (!cfg.retried) { cfg.retried = true; setTimeout(attempt, 900); return; }
+            markFailed(el, cfg);
+          };
+          probe.src = cfg.bg;
+        };
+        attempt();
+        return;
+      }
+
+      el.onload = function () { markDone(el); };
+      el.onerror = function () {
+        if (!cfg.retried) {
+          cfg.retried = true;
+          setTimeout(function () {
+            /* drop the attributes first so the browser really re-requests */
+            el.removeAttribute('srcset');
+            el.removeAttribute('src');
+            assignImage(el, cfg);
+          }, 900);
+          return;
+        }
+        markFailed(el, cfg);
+      };
+      assignImage(el, cfg);
+    }
+
+    /* hydrate everything immediately (used by the debug hook / print) */
+    function loadAll() {
+      registry.forEach(function (cfg, el) { hydrate(el); });
+    }
+
+    return { observe: observe, release: release, loadAll: loadAll, stats: stats, supported: supported };
+  })();
+
+  window.portfolioLazy = lazy;   /* console: portfolioLazy.loadAll() */
+
+  /* ------------------------------------------------------------------ *
+   * 3. Content
+   * ------------------------------------------------------------------ */
+  var NAV = [
+    { label: 'Studio Feed', path: '/' },
+    { label: 'Works in Series', path: '/works-in-series' },
+    { label: 'Portraits', path: '/portraits' },
+    { label: 'Commissions', path: '/commissions' },
+    { label: 'Film', path: '/film' },
+    { label: 'Archive', path: '/archive' },
+    { label: 'Monographs', path: '/monographs' },
+    { label: 'Exhibitions & Talks', path: '/exhibitions' },
+    { label: 'Essays & Reviews', path: '/essays-reviews' },
+    { label: 'News', path: '/news' },
+    { label: 'Biography', path: '/biography' },
+    { label: 'Contact', path: '/contact' }
+  ];
+
+  var PLACES = [
+    'London, England', 'Oslo, Norway', 'Tokyo, Japan', 'Reykjavik, Iceland',
+    'Marrakesh, Morocco', 'Lisbon, Portugal', 'Kyoto, Japan', 'Berlin, Germany',
+    'Cape Town, South Africa', 'Vancouver, Canada', 'Seoul, South Korea', 'Dublin, Ireland',
+    'Athens, Greece', 'Wellington, New Zealand', 'Tbilisi, Georgia', 'Porto, Portugal'
+  ];
+  var ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV',
+               'XVI','XVII','XVIII','XIX','XX','XXI','XXII','XXIII','XXIV','XXV','XXVI'];
+
+  function slugify(title) {
+    return title.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /** Build a series descriptor out of a [title, count] pair. */
+  function makeSeries(sectionPath, pair, index) {
+    var title = pair[0], count = pair[1];
+    var slug = slugify(title);
+    var seed = slug + '-' + index;
+    return {
+      slug: slug,
+      title: title,
+      count: count,
+      meta: 'Series of ' + count,
+      seed: seed,
+      thumb: photo(seed, 720, 1.3),
+      path: sectionPath + '/' + slug
+    };
+  }
+
+  /** Photographs belonging to a series (capped, so a demo page stays light). */
+  function seriesImages(series) {
+    var n = MIN(series.count, 24);
+    return Array.from({ length: n }, function (_, i) {
+      var key = series.seed + '-i' + i;
+      /* every third frame reads as a landscape so the lightbox alternates */
+      var ratio = i % 3 === 1 ? 0.72 : 1.35;
+      var place = PLACES[hash(key) % PLACES.length];
+      var year = 1998 + (hash(key + 'y') % 28);
+      return {
+        key: key,
+        seed: key,
+        ratio: ratio,
+        src: photo(key, 1440, ratio),
+        srcset: photoSet(key, ratio),
+        thumb: photo(key, 480, 1.3),
+        caption: series.title + ' ' + ROMAN[i % ROMAN.length] + ', ' + place + ', ' + year
+      };
+    });
+  }
+
+  /* --- section definitions ------------------------------------------- */
+  var SECTION_ROWS = {
+    '/works-in-series': [
+      ['Northern Light', 34], ['Salt Flats', 22], ['The Weight of Water', 41], ['Field Notes', 18],
+      ['After Dark', 29], ['Slow Country', 25], ['Interiors, 1998-2003', 16], ['Coastal', 31],
+      ['Ash', 12], ['High Desert', 27], ['The River', 44], ['Winter Rooms', 19],
+      ['Bloom', 23], ['Long Exposure', 15]
+    ],
+    '/portraits': [
+      ['Studio Portraits', 62], ['Writers', 24], ['Musicians', 31], ['Theatre', 18],
+      ['Dancers', 14], ['Solitary', 27], ['Twins', 11], ['Public Figures', 38]
+    ],
+    '/commissions': [
+      ['Editorial, 2024-2026', 21], ['Cover Stories', 17], ['Stage & Screen', 26], ['Fashion', 19],
+      ['The Magazine Work', 33], ['Campaigns', 12], ['Annual Reports', 9], ['Portraits for Press', 28],
+      ['Institution', 14]
+    ],
+    '/archive': [
+      ['Early Work, 1989-1994', 36], ['Contact Sheets', 48], ['Polaroids', 22], ['Test Prints', 31],
+      ['Outtakes', 26], ['Colour Studies', 17], ['Travel', 29], ['The Darkroom', 13],
+      ['Unpublished', 41], ['Client Files', 24], ['Exhibition Prints', 19], ['Ephemera', 11]
+    ]
+  };
+
+  var FILM_ROWS = [
+    ['A Short Film about Light', '9:12'], ['Salt', '4:38'], ['The Long River', '17:04'],
+    ['Winter Rooms', '6:51'], ['Interviews: On Printing', '23:17'], ['Studio Notes', '3:44']
+  ];
+
+  var MONOGRAPH_ROWS = [
+    ['Northern Light', 'Steidl', '2024'], ['The Weight of Water', 'Hatje Cantz', '2021'],
+    ['After Dark', 'Aperture', '2019'], ['Coastal', 'Mack', '2017'],
+    ['Slow Country', 'Kehrer', '2015'], ['Early Work', 'Nazraeli', '2012']
+  ];
+
+  var LIST_ROWS = {
+    '/exhibitions': [
+      { title: 'After Dark', meta: 'Flowers Gallery, London — 2025',
+        body: [
+          'Twenty-eight photographs made over four winters, printed large and hung low so that the room darkens as you walk it. The sequence moves from the last of the afternoon light through full darkness and back again.',
+          'Shown with a small catalogue and a second room of working prints, contact sheets and test strips, which is where most of the questions were asked.'
+        ] },
+      { title: 'Northern Light', meta: 'Fotografiska, Stockholm — 2024',
+        body: [
+          'A twelve-room installation of the northern series, sequenced on the wall across three months. Sound was kept out entirely; the only interruption is the window at the far end of the last room.',
+          'The exhibition travelled to two further venues and was accompanied by a programme of walks led by the curator.'
+        ] },
+      { title: 'The Weight of Water', meta: 'Museum Folkwang, Essen — 2023',
+        body: [
+          'Forty-one prints from the river series, shown alongside the notebooks kept while the work was made. The notebooks are the argument; the prints are the result.',
+          'A reading room held the reference material — hydrological surveys, tide tables, and a century of local photographs.'
+        ] },
+      { title: 'Coastal', meta: 'Fotohof, Salzburg — 2022',
+        body: [
+          'The first showing of the coastal work, hung as a single continuous line at eye level so the horizon never breaks between frames.',
+          'Accompanied by a lecture on the difficulties of printing a grey that survives a bright room.'
+        ] },
+      { title: 'Slow Country', meta: 'Le Bal, Paris — 2021',
+        body: [
+          'An exhibition built around duration: the same three views photographed on fourteen separate visits, arranged in strict chronological order.',
+          'Visitors were given a small printed index of the dates, which most took away and few used.'
+        ] },
+      { title: 'Early Work', meta: 'The Photographers\u2019 Gallery, London — 2019',
+        body: [
+          'Negatives from 1989 to 1994, printed for the first time at any scale, together with the first serious attempt at a book.',
+          'The show was intended as a clearing of the desk before the northern series began.'
+        ] },
+      { title: 'In conversation: On Printing', meta: 'Photo London — 2024',
+        body: [
+          'A public conversation about the darkroom: paper choices, the difference between a good print and a useful one, and why the last ten per cent takes half the time.',
+          'Recorded and later published in abridged form.'
+        ] },
+      { title: 'Artist talk: Field Notes', meta: 'Unseen, Amsterdam — 2023',
+        body: [
+          'An hour on the notebooks — how a series is decided before it is photographed, and what happens when it refuses to behave.',
+          'Followed by a portfolio review session with twelve photographers.'
+        ] }
+    ],
+    '/essays-reviews': [
+      { title: 'The quiet eye', meta: 'Aperture — 2025',
+        body: [
+          'There is a kind of photograph that does not announce itself. It sits at the edge of the room and waits to be looked at twice, and by the second look it has usually taken the whole wall.',
+          'That patience is not passivity. It is the result of a long argument with the subject — months of returning to the same place until the place stops performing and starts to disclose itself. The pictures in this portfolio are the record of that argument, and they are best read slowly.'
+        ] },
+      { title: 'On grey', meta: 'British Journal of Photography — 2024',
+        body: [
+          'Grey is the hardest value to print and the easiest to lose. In a bright room it goes flat; under warm light it goes brown. Every darkroom has its own opinion about it.',
+          'The photographs here hold their grey because they were made for it — exposed for the midtones, printed on a paper that keeps its blacks honest, and never asked to carry more contrast than the subject could bear.'
+        ] },
+      { title: 'A portfolio in four parts', meta: 'Foam Magazine — 2024',
+        body: [
+          'Four bodies of work, made over fifteen years, that turn out to be one piece of work with four openings. Coast, river, room, and the people who agreed to sit.',
+          'What holds them together is not a subject but a method: walk, wait, return, print, argue, sequence. The method is the style.'
+        ] },
+      { title: 'Northern Light, reviewed', meta: 'The Guardian — 2023',
+        body: [
+          'A severe and beautiful book. The reproductions are restrained to the point of stubbornness, and the sequencing refuses every obvious climax.',
+          'What emerges is less a survey of a place than a study of attention — and, quietly, one of the better arguments for the printed page that has appeared in years.'
+        ] },
+      { title: 'The weight of water', meta: 'The New Yorker — 2023',
+        body: [
+          'The river series asks a simple question and takes forty photographs to answer it: what does a landscape look like when nobody is in it and nothing is happening?',
+          'The answer, it turns out, is not emptiness. It is an enormous amount of weather.'
+        ] },
+      { title: 'Printing as argument', meta: '1000 Words — 2022',
+        body: [
+          'A print is not a file made visible. It is a set of decisions — paper, exposure, contrast, edge — and those decisions are where the meaning actually lives.',
+          'This essay follows one negative from contact sheet to exhibition print and counts the nine places where it could have gone wrong.'
+        ] },
+      { title: 'Interview: the long exposure', meta: 'Der Greif — 2021',
+        body: [
+          'On working slowly in a fast medium: why a series takes years, why the camera is the least interesting part of the process, and why the best pictures are usually the ones taken on the way back to the car.',
+          'Conducted over two afternoons in the studio, between printing sessions.'
+        ] },
+      { title: 'A note on sequencing', meta: 'Self Publish, Be Happy — 2020',
+        body: [
+          'A book is not a portfolio. The order is the argument, and a sequence that explains itself is already finished.',
+          'Notes from the making of two monographs, including the spreads that were cut and the reasons they were cut.'
+        ] }
+    ],
+    '/news': [
+      { title: 'Northern Light wins the 2026 Book Prize', meta: 'March 2026',
+        body: [
+          'The jury described the book as "a sustained act of looking" and singled out the printing. The award is shared with the publisher and the designer, both of whom argued for fewer pages, correctly.'
+        ] },
+      { title: 'Studio open day, London', meta: 'February 2026',
+        body: [
+          'The studio will be open for one afternoon: work prints on the walls, the darkroom running, no appointments necessary. Prints from the archive will be available at studio prices.'
+        ] },
+      { title: 'New commission for the National Portrait Gallery', meta: 'January 2026',
+        body: [
+          'A commission for twelve new portraits to enter the collection over the next two years, photographed on large format in natural light at the sitters\u2019 own workplaces.'
+        ] },
+      { title: 'After Dark extended to April', meta: 'December 2025',
+        body: [
+          'The London exhibition has been extended by six weeks following demand. The second room of working prints will be rehung for the extension with a new selection of contact sheets.'
+        ] },
+      { title: 'Print sale in aid of the Rivers Trust', meta: 'November 2025',
+        body: [
+          'Six prints from the river series are being sold in an edition of twenty-five, with all proceeds going to the Rivers Trust. Available from the studio and from the gallery.'
+        ] },
+      { title: 'Represented by Flowers Gallery', meta: 'September 2025',
+        body: [
+          'The studio is now represented worldwide by Flowers Gallery, London and New York. Existing print enquiries continue to be handled directly.'
+        ] }
+    ]
+  };
+
+  var BIOGRAPHY = {
+    lead: 'Portfolio is the studio archive of a photographer working between landscape, ' +
+          'portrait and the printed page for more than three decades.',
+    paragraphs: [
+      'The work begins with walking. Long series are built slowly, usually over several years, ' +
+      'returning to the same stretch of coast, river or room until the place stops performing for ' +
+      'the camera and starts to disclose itself. Negatives are printed in the darkroom; sequencing ' +
+      'is decided on the wall rather than on a screen.',
+      'Alongside the personal series there is a commissioned practice — editorial portraits, ' +
+      'theatre and music, campaign and institutional work — which is approached with the same ' +
+      'working method: natural light where possible, a large format camera when the subject allows, ' +
+      'and as much time as the sitter will give.',
+      'Prints are held in public and private collections, and the monographs are distributed ' +
+      'internationally. Talks, teaching and print-making workshops run from the studio throughout ' +
+      'the year.'
+    ],
+    publications: 'Six monographs, most recently Northern Light (Steidl, 2024) and The Weight of Water (Hatje Cantz, 2021).',
+    representation: 'Flowers Gallery, London and New York. Commissions worldwide.'
+  };
+
+  var CONTACT = {
+    columns: [
+      { title: 'Studio', lines: [
+        { text: 'Unit 12, Bell Yard Mews' }, { text: 'London SE1 3TY' }, { text: 'United Kingdom' }
+      ] },
+      { title: 'Enquiries', lines: [
+        { text: 'studio@portfolio.example', href: 'mailto:studio@portfolio.example' },
+        { text: '+44 20 7946 0000', href: 'tel:+442079460000' }
+      ] },
+      { title: 'Commissions', lines: [
+        { text: 'commissions@portfolio.example', href: 'mailto:commissions@portfolio.example' },
+        { text: 'Available worldwide' }
+      ] },
+      { title: 'Elsewhere', lines: [
+        { text: 'Instagram', href: 'https://www.instagram.com/', external: true },
+        { text: 'Twitter', href: 'https://twitter.com/', external: true },
+        { text: 'Newsletter', href: '#/contact' }
+      ] }
+    ]
+  };
+
+  var FEED_ROWS = [
+    ['Northern Light — installation view, Fotografiska, Stockholm', '/works-in-series/northern-light'],
+    ['Salt Flats — new work, sheets 14 to 22', '/works-in-series/salt-flats'],
+    ['Writers — portrait of a novelist, London', '/portraits/writers'],
+    ['After Dark — extended to April', '/works-in-series/after-dark'],
+    ['A commission for the National Portrait Gallery', '/commissions/institution'],
+    ['Coastal — printing in progress', '/works-in-series/coastal'],
+    ['The magazine work, 2024-2026', '/commissions/the-magazine-work'],
+    ['Solitary — a series of twenty-seven portraits', '/portraits/solitary'],
+    ['Contact sheets, 1991', '/archive/contact-sheets'],
+    ['A short film about light', '/film'],
+    ['Studio portraits — new sitting', '/portraits/studio-portraits'],
+    ['Ephemera — posters and invitations', '/archive/ephemera']
+  ];
+
+  /* --- assemble routable sections ------------------------------------ */
+  var SECTIONS = {};
+  Object.keys(SECTION_ROWS).forEach(function (path) {
+    SECTIONS[path] = {
+      kind: 'grid',
+      path: path,
+      title: (NAV.filter(function (n) { return n.path === path; })[0] || {}).label || path,
+      items: SECTION_ROWS[path].map(function (pair, i) { return makeSeries(path, pair, i); })
+    };
+  });
+
+  SECTIONS['/film'] = {
+    kind: 'grid', film: true, path: '/film', title: 'Film',
+    items: FILM_ROWS.map(function (row, i) {
+      var slug = slugify(row[0]);
+      var seed = 'film-' + slug;
+      return {
+        slug: slug, title: row[0], meta: 'Film · ' + row[1], seed: seed,
+        thumb: photo(seed, 720, 0.5625), count: 1, path: '/film/' + slug
+      };
+    })
+  };
+
+  SECTIONS['/monographs'] = {
+    kind: 'grid', path: '/monographs', title: 'Monographs',
+    items: MONOGRAPH_ROWS.map(function (row, i) {
+      var slug = slugify(row[0]);
+      var seed = 'book-' + slug;
+      return {
+        slug: slug, title: row[0], meta: row[1] + ' · ' + row[2], seed: seed,
+        thumb: photo(seed, 720, 1.3), count: 1, path: '/monographs/' + slug
+      };
+    })
+  };
+
+  Object.keys(LIST_ROWS).forEach(function (path) {
+    SECTIONS[path] = {
+      kind: 'list',
+      path: path,
+      title: (NAV.filter(function (n) { return n.path === path; })[0] || {}).label || path,
+      items: LIST_ROWS[path].map(function (row, i) {
+        var slug = slugify(row.title) + '-' + i;
+        return {
+          slug: slug,
+          title: row.title,
+          meta: row.meta,
+          body: row.body || [],
+          path: path + '/' + slug
+        };
+      })
+    };
+  });
+
+  SECTIONS['/biography'] = { kind: 'article', path: '/biography', title: 'Biography', data: BIOGRAPHY };
+  SECTIONS['/contact'] = { kind: 'contact', path: '/contact', title: 'Contact', data: CONTACT };
+
+  var FEED_ITEMS = FEED_ROWS.map(function (row, i) {
+    var parts = row[1].split('/').filter(Boolean);
+    var seed = 'feed-' + i;
+    var ratio = i % 3 === 1 ? 0.7 : 1.28;
+    return {
+      key: seed,
+      seed: seed,
+      ratio: ratio,
+      caption: row[0],
+      path: row[1],
+      section: '/' + (parts[0] || ''),
+      src: photo(seed, 1440, ratio),
+      srcset: photoSet(seed, ratio)
+    };
+  });
+
+  /* ------------------------------------------------------------------ *
+   * 4. Vue application
+   * ------------------------------------------------------------------ */
+  function partsFromHash() {
+    var raw = (window.location.hash || '').replace(/^#/, '');
+    if (!raw || raw === '/') return [];
+    if (raw.charAt(0) !== '/') raw = '/' + raw;
+    return raw.split('/').filter(Boolean);
+  }
+
+  var app = Vue.createApp({
+    data: function () {
+      return {
+        nav: NAV,
+        route: '/',
+        parts: [],
+        navOpen: false,
+        scrolled: false,
+        footerOpen: false,
+        subscribed: false,
+        email: '',
+        footerObserver: null,
+        feedIndex: 0,
+        seriesIndex: 0,
+        /* finger-following paging state, shared by the feed and the lightbox */
+        drag: { active: false, axis: null, dx: 0, startX: 0, startY: 0, time: 0, width: 0, animating: false, timer: null, pendingDir: 0 },
+        stats: stats,
+        year: new Date().getFullYear(),
+        imageSizes: '(min-width:1250px) 1380px, 92vw'
+      };
+    },
+
+    computed: {
+      /* ---- routing ---- */
+      sectionPath: function () { return this.parts.length ? '/' + this.parts[0] : '/'; },
+      isFeed: function () { return this.parts.length === 0; },
+
+      view: function () {
+        if (this.parts.length === 0) {
+          return { kind: 'feed', path: '/', title: '' };
+        }
+        var path = '/' + this.parts[0];
+        var section = SECTIONS[path];
+        if (!section) return { kind: '404', path: path, title: 'Not found' };
+
+        /* a second path segment opens a single item: a written piece on the list
+           sections (Essays & Reviews, Exhibitions & Talks, News) or a series on
+           the grid sections (Film, Monographs, the photographic sections) */
+        if (this.parts.length > 1 && section.items) {
+          var slug = this.parts[1];
+          var item = section.items.filter(function (s) { return s.slug === slug; })[0] || null;
+          if (item && section.kind === 'list') {
+            return { kind: 'post', path: path, sectionPath: path, sectionTitle: section.title, item: item };
+          }
+          if (item) {
+            return { kind: 'series', path: path, sectionPath: path, sectionTitle: section.title, series: item };
+          }
+          /* unknown slug: fall back to the section index */
+        }
+        if (section.kind === 'article') return { kind: 'article', path: path, title: section.title, lead: section.data.lead, paragraphs: section.data.paragraphs, publications: section.data.publications, representation: section.data.representation };
+        if (section.kind === 'contact') return { kind: 'contact', path: path, title: section.title, columns: section.data.columns };
+        return {
+          kind: section.kind,
+          path: path,
+          title: section.title,
+          items: section.items || [],
+          film: !!section.film
+        };
+      },
+
+      viewKey: function () { return this.parts.join('/') || 'feed'; },
+
+      sectionTitle: function () {
+        if (this.view.kind === 'series') return this.view.series.title;
+        if (this.view.kind === 'post') return this.view.item.title;
+        return this.view.title || '';
+      },
+
+      contentClass: function () {
+        if (this.view.kind === 'feed') return 'site-content--feed';
+        return 'site-content--' + this.view.kind;
+      },
+
+      rootClass: function () {
+        return { 'site': true, 'page-feed': this.view.kind === 'feed', 'page-lightbox': this.view.kind === 'series', 'is-feed': this.view.kind === 'feed' };
+      },
+
+      /* ---- feed ---- */
+      feedItems: function () { return FEED_ITEMS; },
+      currentFeed: function () { return FEED_ITEMS[this.feedIndex] || FEED_ITEMS[0]; },
+
+      /* ---- slider: the three-slide window both sliders are built from ---- */
+      slideList: function () {
+        if (this.view.kind === 'feed') return FEED_ITEMS;
+        if (this.view.kind === 'series') return this.images;
+        return [];
+      },
+      currentIndex: function () {
+        return this.view.kind === 'feed' ? this.feedIndex : this.seriesIndex;
+      },
+      slides: function () {
+        var list = this.slideList, n = list.length, i = this.currentIndex;
+        if (!n) return [];
+        if (n === 1) return [{ item: list[0], key: list[0].key }];
+        /* prev + current + next, keyed by content: across the silent re-centre
+           the same nodes move, so the swap is invisible and nothing re-downloads */
+        var slot = function (item, role) {
+          return { item: item, key: n >= 3 ? item.key : role + ':' + item.key };
+        };
+        return [
+          slot(list[(i - 1 + n) % n], 'prev'),
+          slot(list[i], 'cur'),
+          slot(list[(i + 1) % n], 'next')
+        ];
+      },
+      trackStyle: function () {
+        var k = this.slides.length || 1;
+        var base = k > 1 ? 100 / k : 0;                  /* centre slide, as % of the track */
+        var dx = this.drag.dx || 0;
+        return {
+          '--slide-count': k,
+          transform: 'translate3d(calc(-' + base + '% + ' + dx + 'px), 0, 0)',
+          transition: this.drag.animating ? 'transform ' + this.slideMs + 'ms cubic-bezier(.22,.61,.36,1)' : 'none'
+        };
+      },
+      /* honour prefers-reduced-motion: the frame still turns, it just does not glide */
+      slideMs: function () {
+        return (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 1 : 330;
+      },
+
+      /* ---- series ---- */
+      images: function () {
+        if (this.view.kind !== 'series') return [];
+        return seriesImages(this.view.series);
+      },
+      currentImage: function () {
+        return this.images[this.seriesIndex] || this.images[0] || { key: 'none', src: '', srcset: '', caption: '', ratio: 1.3 };
+      }
+    },
+
+    watch: {
+      /* route change: reset scroll, close the mobile nav, refresh the title */
+      route: function () {
+        this.navOpen = false;
+        window.scrollTo(0, 0);
+        this.syncTitle();
+      },
+      seriesIndex: function () { this.prefetchNeighbour(this.images, this.seriesIndex); },
+      feedIndex: function () { this.prefetchNeighbour(this.feedItems, this.feedIndex); }
+    },
+
+    mounted: function () {
+      var self = this;
+
+      this.syncRoute();
+      this.syncTitle();                     /* deep links get their own title immediately */
+      window.addEventListener('hashchange', function () { self.syncRoute(); });
+      window.addEventListener('scroll', this.onScroll, { passive: true });
+      window.addEventListener('keydown', this.onKey);
+
+      this.onScroll();
+      this.startFeedTimer();
+      this.watchFooter();
+
+      /* images already inside the first viewport are requested as soon as the
+         observer reports them (next frame); this keeps the first paint light. */
+      this.$nextTick(function () { self.prefetchNeighbour(self.feedItems, 0); });
+    },
+
+    beforeUnmount: function () {
+      window.removeEventListener('scroll', this.onScroll);
+      window.removeEventListener('keydown', this.onKey);
+      if (this.footerObserver) this.footerObserver.disconnect();
+      this.resetDrag();
+      this.stopFeedTimer();
+    },
+
+    methods: {
+      /* ---------- routing ---------- */
+      syncRoute: function () {
+        this.parts = partsFromHash();
+        /* deep links look like #/portraits/solitary/i/7 — keep the frame */
+        var deep = 0;
+        if (this.parts[2] === 'i' && this.parts[3]) {
+          var n = parseInt(this.parts[3], 10);
+          if (isFinite(n) && n > 0) deep = n - 1;
+        }
+        this.seriesIndex = deep;
+        this.route = this.parts.length ? '/' + this.parts.join('/') : '/';
+      },
+      syncTitle: function () {
+        var t = this.sectionTitle;
+        document.title = t ? t + ' \u2013 Portfolio' : 'Portfolio';
+      },
+      isActive: function (path) {
+        var current = this.parts.length ? '/' + this.parts[0] : '/';
+        return current === path;
+      },
+      closeNav: function () { this.navOpen = false; },
+
+      /* ---------- chrome ---------- */
+      onScroll: function () { this.scrolled = window.pageYOffset > 8; },
+
+      /* the studio feed is sized against the real footer height, whatever the viewport:
+         measure it and keep the --footer-h token honest */
+      watchFooter: function () {
+        var self = this;
+        var el = this.$el.querySelector('.site-footer');
+        if (!el) return;
+        this.applyFooterHeight(el);
+        if (typeof ResizeObserver === 'function') {
+          this.footerObserver = new ResizeObserver(function () { self.applyFooterHeight(el); });
+          this.footerObserver.observe(el);
+        } else {
+          window.addEventListener('resize', function () { self.applyFooterHeight(el); });
+        }
+      },
+      applyFooterHeight: function (el) {
+        var h = Math.round(el.getBoundingClientRect().height);
+        if (h > 0) document.documentElement.style.setProperty('--footer-h', h + 'px');
+      },
+      onKey: function (e) {
+        if (e.key === 'Escape') {
+          if (this.navOpen) { this.navOpen = false; return; }
+          if (this.view.kind === 'series') { window.location.hash = '#' + this.view.sectionPath; return; }
+        }
+        if (e.key === 'ArrowLeft') {
+          if (this.view.kind === 'feed') this.feedPrev();
+          else if (this.view.kind === 'series') this.seriesPrev();
+        }
+        if (e.key === 'ArrowRight') {
+          if (this.view.kind === 'feed') this.feedNext();
+          else if (this.view.kind === 'series') this.seriesNext();
+        }
+      },
+
+      /* ---------- feed ---------- */
+      feedNext: function () { this.step(1); },
+      feedPrev: function () { this.step(-1); },
+      startFeedTimer: function () {
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        var self = this;
+        this.feedTimer = window.setInterval(function () {
+          if (document.hidden || self.view.kind !== 'feed') return;
+          self.step(1);
+        }, 7000);
+      },
+      restartFeedTimer: function () { this.stopFeedTimer(); this.startFeedTimer(); },
+      stopFeedTimer: function () { if (this.feedTimer) { window.clearInterval(this.feedTimer); this.feedTimer = null; } },
+
+      /* warm both neighbours so paging never reveals a grey plate */
+      prefetchNeighbour: function (list, index) {
+        if (!list || list.length < 2) return;
+        var self = this;
+        [1, -1].forEach(function (delta) {
+          var item = list[(index + delta + list.length) % list.length];
+          if (!item || !item.src || item.__prefetched) return;
+          item.__prefetched = true;
+          var im = new Image();
+          im.decoding = 'async';
+          im.src = item.src;
+        });
+      },
+
+      /* ---------- series ---------- */
+      selectImage: function (i) {
+        this.resetDrag();
+        this.seriesIndex = i;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+      seriesNext: function () { this.step(1); },
+      seriesPrev: function () { this.step(-1); },
+
+      /* ---------- slider: finger-following paging ----------
+         The track is a three-slide window. While the finger is down the track
+         follows it; on release it either springs back or eases one frame across
+         and then re-centres silently. Vertical page scrolling and pinch-zoom
+         stay entirely with the browser (touch-action: pan-y pinch-zoom), so only
+         a genuine horizontal drag is ever claimed and a tap still reaches the
+         arrow zones. */
+      viewportWidth: function () {
+        var el = this.$refs.viewport;
+        return el ? el.clientWidth : window.innerWidth;
+      },
+      resetDrag: function () {
+        if (this.drag.timer) { window.clearTimeout(this.drag.timer); this.drag.timer = null; }
+        this.drag.active = false;
+        this.drag.axis = null;
+        this.drag.animating = false;
+        this.drag.pendingDir = 0;
+        this.drag.dx = 0;
+      },
+      sliderStart: function (e) {
+        var t = (e.touches && e.touches.length === 1) ? e.touches[0] : null;
+        this.resetDrag();
+        if (!t || this.slideList.length < 2) return;
+        this.drag.active = true;
+        this.drag.startX = t.clientX;
+        this.drag.startY = t.clientY;
+        this.drag.time = Date.now();
+        this.drag.width = this.viewportWidth();
+      },
+      sliderMove: function (e) {
+        if (!this.drag.active) return;
+        var t = e.touches && e.touches[0];
+        if (!t) return;
+        var dx = t.clientX - this.drag.startX;
+        var dy = t.clientY - this.drag.startY;
+        if (!this.drag.axis) {
+          if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;          /* let the gesture declare itself */
+          this.drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        }
+        if (this.drag.axis !== 'x') return;                          /* vertical: leave it to the page */
+        this.drag.dx = dx;                                           /* the image follows the finger */
+      },
+      sliderEnd: function () {
+        if (!this.drag.active) return;
+        this.drag.active = false;
+        var axis = this.drag.axis;
+        this.drag.axis = null;
+        if (axis !== 'x') { this.drag.dx = 0; return; }
+        var w = this.drag.width || this.viewportWidth() || 1;
+        var dx = this.drag.dx;
+        var ms = Math.max(1, Date.now() - this.drag.time);
+        var far = Math.abs(dx) > w * 0.22;                           /* dragged more than a fifth across */
+        var flick = Math.abs(dx) > 24 && Math.abs(dx) / ms > 0.45;   /* or flicked hard enough */
+        if (!far && !flick) {                                        /* spring back */
+          var self = this;
+          this.drag.animating = true;
+          this.drag.dx = 0;
+          window.setTimeout(function () { self.drag.animating = false; }, this.slideMs);
+          return;
+        }
+        this.step(dx < 0 ? 1 : -1);
+      },
+      step: function (dir) {
+        var list = this.slideList;
+        if (!list || list.length < 2) return;
+        var self = this;
+        var w = this.viewportWidth() || 1;
+        if (this.drag.timer) {                                       /* finish the frame in flight first */
+          window.clearTimeout(this.drag.timer);
+          this.commit(this.drag.pendingDir);
+          this.drag.timer = null;
+          this.drag.animating = false;
+          this.drag.dx = 0;
+        }
+        this.drag.pendingDir = dir;
+        this.drag.animating = true;
+        this.drag.dx = -dir * w;                                     /* ease one frame across */
+        this.drag.timer = window.setTimeout(function () {
+          self.commit(self.drag.pendingDir);                         /* swap, then re-centre silently */
+          self.drag.timer = null;
+          self.drag.animating = false;
+          self.drag.dx = 0;
+        }, this.slideMs);
+      },
+      commit: function (dir) {
+        if (!dir) return;
+        if (this.view.kind === 'feed') {
+          this.feedIndex = (this.feedIndex + dir + this.feedItems.length) % this.feedItems.length;
+          this.restartFeedTimer();
+        } else if (this.view.kind === 'series') {
+          this.seriesIndex = (this.seriesIndex + dir + this.images.length) % this.images.length;
+        }
+      },
+
+      /* ---------- footer ---------- */
+      subscribe: function () {
+        if (!this.email) return;
+        this.subscribed = true;
+        this.email = '';
+        this.footerOpen = false;
+      },
+
+      /* ---------- utilities ---------- */
+      pad: function (n) { return (n < 10 ? '0' : '') + n; }
+    }
+  });
+
+  /* the lazy directive: value = { key, src, srcset, sizes, bg, ratio } */
+  app.directive('lazy', {
+    mounted: function (el, binding) { lazy.observe(el, binding.value); },
+    updated: function (el, binding) {
+      var next = binding.value, prev = binding.oldValue;
+      if (!next) return;
+      if (!prev || next.key !== prev.key) lazy.observe(el, next);
+    },
+    unmounted: function (el) { lazy.release(el); }
+  });
+
+  app.mount('#app');
+})();
+</script>
+</body>
+</html>

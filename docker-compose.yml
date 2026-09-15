@@ -1,0 +1,40 @@
+# One command to run the whole thing on a VPS:
+#
+#   cp deploy/.env.example .env   # then edit DOMAIN and COOKIE_SECRET
+#   docker compose up -d --build
+#
+# The app serves both the API and the built site on one port; Caddy sits in front
+# and gets a Let's Encrypt certificate for DOMAIN automatically. State lives in
+# ./data on the host, so backing up the site is backing up that folder.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # the SQLite database, outside the image, easy to back up
+      - ./data:/data
+    ports:
+      # published on loopback only, for `curl localhost:8787/api/health`,
+      # `npm run smoke` from the host, and debugging. Caddy reaches the app over
+      # the compose network, so nothing needs to be exposed publicly.
+      - "127.0.0.1:8787:8787"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
