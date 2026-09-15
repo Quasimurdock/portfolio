@@ -7,7 +7,7 @@
 import { Router } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
-import { all, get, run } from '../db.js'
+import { all, get, insertReturningId, run } from '../db.js'
 import { record } from '../audit.js'
 import { asyncHandler, badRequest, conflict, forbidden, notFound, parseBody } from '../errors.js'
 import {
@@ -45,13 +45,13 @@ const patchSchema = z.object({
 router.get(
   '/',
   requirePermission('user.read'),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const where = ['1 = 1']
     const args = []
 
     if (req.query.q) {
       const term = likeTerm(req.query.q)
-      where.push(`(u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')`)
+      where.push(`(lower(u.name) LIKE lower(?) ESCAPE '\\' OR lower(u.email) LIKE lower(?) ESCAPE '\\')`)
       args.push(term, term)
     }
     if (req.query.role) {
@@ -65,9 +65,9 @@ router.get(
     }
 
     const clause = where.join(' AND ')
-    const total = get(`SELECT COUNT(*) AS n FROM users u WHERE ${clause}`, args).n
+    const total = (await get(`SELECT COUNT(*) AS n FROM users u WHERE ${clause}`, args)).n
     const { page, pageSize, offset } = paging(req.query)
-    const rows = all(
+    const rows = await all(
       `SELECT u.* FROM users u WHERE ${clause} ORDER BY u.name ASC, u.id ASC LIMIT ? OFFSET ?`,
       [...args, pageSize, offset],
     )
@@ -80,24 +80,23 @@ router.get(
 router.post(
   '/',
   requirePermission('user.invite'),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const data = parseBody(createSchema, req.body)
-    const existing = get('SELECT id FROM users WHERE email = ? COLLATE NOCASE', [data.email])
+    const existing = await get('SELECT id FROM users WHERE lower(email) = lower(?)', [data.email])
     if (existing) throw conflict('That email is already in use', { email: data.email })
     if (!roleExists(data.role)) throw badRequest(`Unknown role: ${data.role}`, { role: data.role })
 
     const now = nowIso()
     const inviteToken = crypto.randomBytes(24).toString('base64url')
-    const result = run(
+    const id = await insertReturningId(
       `INSERT INTO users
          (email, name, avatar_url, password_hash, role_key, status, invited_by, invite_token, created_at, updated_at)
        VALUES (?, ?, NULL, NULL, ?, 'invited', ?, ?, ?, ?)`,
       [data.email, data.name, data.role, req.user.id, inviteToken, now, now],
     )
 
-    const id = Number(result.lastInsertRowid)
-    record(req.user.id, 'invite', ENTITY, id, { email: data.email, role: data.role })
-    const row = get('SELECT * FROM users WHERE id = ?', [id])
+    await record(req.user.id, 'invite', ENTITY, id, { email: data.email, role: data.role })
+    const row = await get('SELECT * FROM users WHERE id = ?', [id])
     res.status(201).json({ ...toUser(row), inviteToken })
   }),
 )
@@ -107,9 +106,9 @@ router.post(
 router.patch(
   '/:id',
   requirePermission('user.update'),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = get('SELECT * FROM users WHERE id = ?', [id])
+    const row = await get('SELECT * FROM users WHERE id = ?', [id])
     if (!row) throw notFound('No such user')
 
     const data = parseBody(patchSchema, req.body)
@@ -137,17 +136,17 @@ router.patch(
       args.push(data.status)
       if (data.status === 'active') sets.push('invite_token = NULL')
       // a disabled account loses its sessions immediately
-      if (data.status === 'disabled') run('DELETE FROM sessions WHERE user_id = ?', [id])
+      if (data.status === 'disabled') await run('DELETE FROM sessions WHERE user_id = ?', [id])
     }
 
     if (sets.length) {
       sets.push('updated_at = ?')
       args.push(nowIso(), id)
-      run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, args)
+      await run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, args)
     }
 
-    record(req.user.id, 'update', ENTITY, id, { fields: Object.keys(data), ...(data.role ? { role: data.role } : {}) })
-    res.json(toUser(get('SELECT * FROM users WHERE id = ?', [id])))
+    await record(req.user.id, 'update', ENTITY, id, { fields: Object.keys(data), ...(data.role ? { role: data.role } : {}) })
+    res.json(toUser(await get('SELECT * FROM users WHERE id = ?', [id])))
   }),
 )
 

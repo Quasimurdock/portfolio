@@ -7,7 +7,7 @@
  */
 import { Router } from 'express'
 import { z } from 'zod'
-import { all, get, run } from '../db.js'
+import { all, get, insertReturningId, run } from '../db.js'
 import { record } from '../audit.js'
 import { asyncHandler, badRequest, notFound, parseBody } from '../errors.js'
 import { paging, requireAuth, requirePermission, statusParam, assertStatusTransition } from '../middleware.js'
@@ -57,25 +57,25 @@ const patchSchema = z.object({
 const SELECT_ONE = `SELECT f.*, u.name AS author_name FROM feed_items f JOIN users u ON u.id = f.author_id WHERE f.id = ?`
 const SELECT_MANY = `SELECT f.*, u.name AS author_name FROM feed_items f JOIN users u ON u.id = f.author_id`
 
-function loadItem(id) {
-  return get(SELECT_ONE, [id])
+async function loadItem(id) {
+  return await get(SELECT_ONE, [id])
 }
 
-function imageFor(imageId) {
-  return imageId ? get('SELECT * FROM images WHERE id = ?', [imageId]) : null
+async function imageFor(imageId) {
+  return imageId ? await get('SELECT * FROM images WHERE id = ?', [imageId]) : null
 }
 
-/** References must exist before we write them — SQLite would only say "FK". */
-function checkReferences(data) {
+/** References must exist before we write them — the driver would only report a foreign-key violation. */
+async function checkReferences(data) {
   if (data.imageId !== undefined) {
-    if (!imageFor(data.imageId)) throw badRequest(`Unknown imageId: ${data.imageId}`, { imageId: data.imageId })
+    if (!(await imageFor(data.imageId))) throw badRequest(`Unknown imageId: ${data.imageId}`, { imageId: data.imageId })
   }
   if (data.targetCollectionId) {
-    const row = get('SELECT id FROM collections WHERE id = ?', [data.targetCollectionId])
+    const row = await get('SELECT id FROM collections WHERE id = ?', [data.targetCollectionId])
     if (!row) throw badRequest(`Unknown targetCollectionId: ${data.targetCollectionId}`)
   }
   if (data.targetArticleId) {
-    const row = get('SELECT id FROM articles WHERE id = ?', [data.targetArticleId])
+    const row = await get('SELECT id FROM articles WHERE id = ?', [data.targetArticleId])
     if (!row) throw badRequest(`Unknown targetArticleId: ${data.targetArticleId}`)
   }
 }
@@ -84,7 +84,7 @@ function checkReferences(data) {
 
 router.get(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const where = ['1 = 1']
     const args = []
     const status = statusParam(req.query.status)
@@ -93,13 +93,14 @@ router.get(
       args.push(status)
     }
     const clause = where.join(' AND ')
-    const total = get(`SELECT COUNT(*) AS n FROM feed_items f WHERE ${clause}`, args).n
+    const total = (await get(`SELECT COUNT(*) AS n FROM feed_items f WHERE ${clause}`, args)).n
     const { page, pageSize, offset } = paging(req.query)
-    const rows = all(
+    const rows = await all(
       `${SELECT_MANY} WHERE ${clause} ORDER BY f.position ASC, f.id ASC LIMIT ? OFFSET ?`,
       [...args, pageSize, offset],
     )
-    res.json(paged(rows.map((row) => toFeedItem(row, { image: imageFor(row.image_id) })), total, page, pageSize))
+    const items = await Promise.all(rows.map(async (row) => toFeedItem(row, { image: await imageFor(row.image_id) })))
+    res.json(paged(items, total, page, pageSize))
   }),
 )
 
@@ -107,14 +108,14 @@ router.get(
 
 router.post(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const data = parseBody(createSchema, req.body)
-    checkReferences(data)
+    await checkReferences(data)
     const status = data.status ?? 'published'
     assertStatusTransition(req.user, null, status)
 
     const now = nowIso()
-    const result = run(
+    const id = await insertReturningId(
       `INSERT INTO feed_items
          (image_id, caption, link_kind, link_url, target_collection_id, target_article_id,
           status, position, author_id, created_at, updated_at)
@@ -134,10 +135,9 @@ router.post(
       ],
     )
 
-    const id = Number(result.lastInsertRowid)
-    record(req.user.id, 'create', ENTITY, id, { imageId: data.imageId })
-    const row = loadItem(id)
-    res.status(201).json(toFeedItem(row, { image: imageFor(row.image_id) }))
+    await record(req.user.id, 'create', ENTITY, id, { imageId: data.imageId })
+    const row = await loadItem(id)
+    res.status(201).json(toFeedItem(row, { image: await imageFor(row.image_id) }))
   }),
 )
 
@@ -145,13 +145,13 @@ router.post(
 
 router.patch(
   '/:id',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadItem(id)
+    const row = await loadItem(id)
     if (!row) throw notFound('No such feed item')
 
     const data = parseBody(patchSchema, req.body)
-    checkReferences(data)
+    await checkReferences(data)
 
     const sets = []
     const args = []
@@ -173,17 +173,17 @@ router.patch(
     if (sets.length) {
       sets.push('updated_at = ?')
       args.push(nowIso(), id)
-      run(`UPDATE feed_items SET ${sets.join(', ')} WHERE id = ?`, args)
+      await run(`UPDATE feed_items SET ${sets.join(', ')} WHERE id = ?`, args)
     }
 
-    record(req.user.id, 'update', ENTITY, id, {
+    await record(req.user.id, 'update', ENTITY, id, {
       fields: Object.keys(data),
       ...(data.status !== undefined && data.status !== row.status
         ? { status: { from: row.status, to: data.status } }
         : {}),
     })
-    const fresh = loadItem(id)
-    res.json(toFeedItem(fresh, { image: imageFor(fresh.image_id) }))
+    const fresh = await loadItem(id)
+    res.json(toFeedItem(fresh, { image: await imageFor(fresh.image_id) }))
   }),
 )
 
@@ -191,13 +191,13 @@ router.patch(
 
 router.delete(
   '/:id',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadItem(id)
+    const row = await loadItem(id)
     if (!row) throw notFound('No such feed item')
 
-    run('DELETE FROM feed_items WHERE id = ?', [id])
-    record(req.user.id, 'delete', ENTITY, id, { imageId: row.image_id })
+    await run('DELETE FROM feed_items WHERE id = ?', [id])
+    await record(req.user.id, 'delete', ENTITY, id, { imageId: row.image_id })
     res.status(204).end()
   }),
 )

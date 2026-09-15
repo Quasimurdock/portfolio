@@ -14,16 +14,19 @@
  *   npm --workspace server run cli -- wipe-content --yes
  *
  * Inside Docker:
- *   docker compose exec app node server/src/cli.js users
+ *   docker compose exec app deno run --allow-all server/src/cli.js users
+ *
+ * Against a deployed Postgres (Deno Deploy has no shell, so this is how accounts
+ * are made there):
+ *   DB_DRIVER=postgres DATABASE_URL='postgresql://…' deno run --allow-all src/cli.js users
  *
  * A generated password is printed once and never stored in plain text. This runs
- * on the server, against the same SQLite file the API uses, so pass DATABASE_FILE
- * if the app is configured with a non-default path.
+ * on the server, against the same database the API uses; when the SQLite driver
+ * is configured, pass DATABASE_FILE if it points somewhere non-default.
  */
 import crypto from 'node:crypto'
 
-import { config } from './config.js'
-import { initDb, all, get, run } from './db.js'
+import { all, describeTarget, get, initDb, run } from './db.js'
 import { hashPassword } from './auth.js'
 import { record } from './audit.js'
 import { ROLE_KEYS } from './permissions.js'
@@ -60,8 +63,8 @@ function banner(text) {
 
 /* ------------------------------------------------------------------ actions -- */
 
-function listUsers() {
-  const rows = all(
+async function listUsers() {
+  const rows = await all(
     `SELECT id, email, name, role_key, status, password_hash IS NOT NULL AS has_password,
             wechat_openid IS NOT NULL AS has_wechat, last_login_at
        FROM users ORDER BY id`,
@@ -81,33 +84,33 @@ function listUsers() {
   console.log('\nroles: ' + ROLE_KEYS.join(', '))
 }
 
-function createUser() {
+async function createUser() {
   const email = flag('email')
   const name = flag('name') || (typeof email === 'string' ? email.split('@')[0] : null)
   const role = flag('role') || 'owner'
   if (typeof email !== 'string' || !email.includes('@')) fail('--email is required (and must look like an address)')
   if (!ROLE_KEYS.includes(role)) fail(`--role must be one of: ${ROLE_KEYS.join(', ')}`)
-  if (get('SELECT id FROM users WHERE email = ?', [email])) fail(`a user with ${email} already exists`)
+  if (await get('SELECT id FROM users WHERE email = ?', [email])) fail(`a user with ${email} already exists`)
 
   const password = typeof flag('password') === 'string' ? flag('password') : generatePassword()
   const now = nowIso()
-  run(
+  await run(
     `INSERT INTO users (email, name, avatar_url, password_hash, role_key, status, created_at, updated_at)
      VALUES (?, ?, NULL, ?, ?, 'active', ?, ?)`,
     [email, name, hashPassword(password), role, now, now],
   )
-  const id = get('SELECT id FROM users WHERE email = ?', [email]).id
-  record(null, 'cli-create', 'user', id, { email, role })
+  const id = (await get('SELECT id FROM users WHERE email = ?', [email])).id
+  await record(null, 'cli-create', 'user', id, { email, role })
 
   banner(`created ${email} (${role})`)
   console.log(`  password: ${password}`)
   console.log('  printed once — change it with:  npm --workspace server run cli -- passwd --email ' + email)
 }
 
-function setPassword() {
+async function setPassword() {
   const email = flag('email')
   if (typeof email !== 'string') fail('--email is required')
-  const user = get('SELECT id, email, status FROM users WHERE email = ?', [email])
+  const user = await get('SELECT id, email, status FROM users WHERE email = ?', [email])
   if (!user) fail(`no user with the email ${email}`)
 
   const password = typeof flag('password') === 'string' ? flag('password') : generatePassword()
@@ -116,31 +119,31 @@ function setPassword() {
   const now = nowIso()
   // accepting an invitation is exactly this: a password plus active status
   const activated = user.status === 'invited'
-  run(
+  await run(
     `UPDATE users SET password_hash = ?, status = ?, invite_token = NULL, updated_at = ? WHERE id = ?`,
     [hashPassword(password), activated ? 'active' : user.status, now, user.id],
   )
-  record(null, 'cli-passwd', 'user', user.id, { email, activated })
+  await record(null, 'cli-passwd', 'user', user.id, { email, activated })
 
   banner(`password set for ${email}${activated ? ' (invitation accepted → active)' : ''}`)
   console.log(`  password: ${password}`)
   console.log('  printed once.')
 }
 
-function setStatus() {
+async function setStatus() {
   const email = flag('email')
   const value = flag('set')
   if (typeof email !== 'string') fail('--email is required')
   if (value !== 'active' && value !== 'disabled' && value !== 'invited') fail('--set must be active, disabled or invited')
-  const user = get('SELECT id FROM users WHERE email = ?', [email])
+  const user = await get('SELECT id FROM users WHERE email = ?', [email])
   if (!user) fail(`no user with the email ${email}`)
-  run('UPDATE users SET status = ?, updated_at = ? WHERE id = ?', [value, nowIso(), user.id])
-  record(null, 'cli-status', 'user', user.id, { email, status: value })
+  await run('UPDATE users SET status = ?, updated_at = ? WHERE id = ?', [value, nowIso(), user.id])
+  await record(null, 'cli-status', 'user', user.id, { email, status: value })
   banner(`${email} → ${value}`)
   if (value === 'disabled') console.log('  their existing sessions are dropped on next request.')
 }
 
-function wipeContent() {
+async function wipeContent() {
   if (flag('yes') !== true) {
     console.log('This deletes every collection, image, article, feed slide and page.')
     console.log('Users, roles, permissions and sections are kept.')
@@ -149,24 +152,24 @@ function wipeContent() {
     return
   }
   const before = {
-    feed: get('SELECT COUNT(*) n FROM feed_items').n,
-    images: get('SELECT COUNT(*) n FROM images').n,
-    collections: get('SELECT COUNT(*) n FROM collections').n,
-    articles: get('SELECT COUNT(*) n FROM articles').n,
-    pages: get('SELECT COUNT(*) n FROM pages').n,
+    feed: (await get('SELECT COUNT(*) n FROM feed_items')).n,
+    images: (await get('SELECT COUNT(*) n FROM images')).n,
+    collections: (await get('SELECT COUNT(*) n FROM collections')).n,
+    articles: (await get('SELECT COUNT(*) n FROM articles')).n,
+    pages: (await get('SELECT COUNT(*) n FROM pages')).n,
   }
   // order matters: children before parents (foreign keys are ON)
   for (const table of ['feed_items', 'images', 'collections', 'articles', 'pages']) {
-    run(`DELETE FROM ${table}`)
+    await run(`DELETE FROM ${table}`)
   }
-  record(null, 'cli-wipe', 'content', null, before)
+  await record(null, 'cli-wipe', 'content', null, before)
   banner('demo content removed')
   for (const [k, v] of Object.entries(before)) console.log(`  ${k.padEnd(12)} ${v} row(s) deleted`)
   console.log('\nThe admin (/admin) is now empty and ready for your own work.')
 }
 
 function usage() {
-  console.log(`Portfolio CLI — ${config.databaseFile}
+  console.log(`Portfolio CLI — ${describeTarget()}
 
   users                                  list accounts
   create  --email --name --role          create an account (role: ${ROLE_KEYS.join('|')})
@@ -176,31 +179,31 @@ function usage() {
   wipe-content [--yes]                    delete the demo content, keep users and sections
 
 Flags: --email, --name, --role, --password, --set, --yes
-Inside Docker:  docker compose exec app node server/src/cli.js <command>`)
+Inside Docker:  docker compose exec app deno run --allow-all server/src/cli.js <command>`)
 }
 
 /* -------------------------------------------------------------------- main -- */
 
-initDb()
+await initDb()
 
 switch (command) {
   case 'users':
   case 'list':
-    listUsers()
+    await listUsers()
     break
   case 'create':
   case 'create-user':
-    createUser()
+    await createUser()
     break
   case 'passwd':
   case 'password':
-    setPassword()
+    await setPassword()
     break
   case 'status':
-    setStatus()
+    await setStatus()
     break
   case 'wipe-content':
-    wipeContent()
+    await wipeContent()
     break
   default:
     usage()

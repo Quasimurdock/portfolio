@@ -11,7 +11,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { config } from '../config.js'
-import { get, lastId, run } from '../db.js'
+import { get, insertReturningId, run } from '../db.js'
 import { record } from '../audit.js'
 import {
   SID_COOKIE,
@@ -50,20 +50,20 @@ function sessionPayload(row) {
 }
 
 /** Mint a session and hand the browser its signed cookie. */
-function startSession(req, res, user) {
-  const { token } = createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip })
+async function startSession(req, res, user) {
+  const { token } = await createSession(user.id, { userAgent: req.get('user-agent'), ip: req.ip })
   res.append(
     'Set-Cookie',
     serializeCookie(SID_COOKIE, signCookie(token), { maxAge: config.sessionTtlDays * DAY_SECONDS }),
   )
   const now = nowIso()
-  run('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?', [now, now, user.id])
+  await run('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?', [now, now, user.id])
   return token
 }
 
-function endSession(req, res) {
+async function endSession(req, res) {
   const token = sessionTokenFrom(req)
-  if (token) revokeSession(token)
+  if (token) await revokeSession(token)
   res.append('Set-Cookie', clearCookie(SID_COOKIE))
 }
 
@@ -71,9 +71,9 @@ function endSession(req, res) {
 
 router.post(
   '/login',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const { email, password } = parseBody(loginSchema, req.body)
-    const user = get('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [email])
+    const user = await get('SELECT * FROM users WHERE lower(email) = lower(?)', [email])
 
     if (!user || !verifyPassword(password, user.password_hash)) {
       throw new ApiError(401, 'invalid_credentials', 'Email or password is incorrect')
@@ -82,17 +82,17 @@ router.post(
       throw forbidden('This account is not active')
     }
 
-    startSession(req, res, user)
-    record(user.id, 'login', 'session', null, { method: 'password' })
-    const fresh = get('SELECT * FROM users WHERE id = ?', [user.id])
+    await startSession(req, res, user)
+    await record(user.id, 'login', 'session', null, { method: 'password' })
+    const fresh = await get('SELECT * FROM users WHERE id = ?', [user.id])
     res.json(sessionPayload(fresh))
   }),
 )
 
 router.post(
   '/logout',
-  asyncHandler((req, res) => {
-    endSession(req, res)
+  asyncHandler(async (req, res) => {
+    await endSession(req, res)
     res.json({ ok: true })
   }),
 )
@@ -147,13 +147,13 @@ router.get(
     const now = nowIso()
 
     let user = null
-    if (profile.unionid) user = get('SELECT * FROM users WHERE wechat_unionid = ?', [profile.unionid])
-    if (!user && profile.openid) user = get('SELECT * FROM users WHERE wechat_openid = ?', [profile.openid])
-    if (!user && profile.email) user = get('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [profile.email])
+    if (profile.unionid) user = await get('SELECT * FROM users WHERE wechat_unionid = ?', [profile.unionid])
+    if (!user && profile.openid) user = await get('SELECT * FROM users WHERE wechat_openid = ?', [profile.openid])
+    if (!user && profile.email) user = await get('SELECT * FROM users WHERE lower(email) = lower(?)', [profile.email])
 
     if (!user) {
       const role = config.wechat.defaultRole || 'author'
-      run(
+      const newUserId = await insertReturningId(
         `INSERT INTO users
            (email, name, avatar_url, password_hash, role_key, status,
             wechat_openid, wechat_unionid, wechat_nickname, wechat_avatar, created_at, updated_at)
@@ -171,11 +171,11 @@ router.get(
           now,
         ],
       )
-      user = get('SELECT * FROM users WHERE id = ?', [lastId()])
-      record(user.id, 'invite', 'user', user.id, { via: 'wechat' })
+      user = await get('SELECT * FROM users WHERE id = ?', [newUserId])
+      await record(user.id, 'invite', 'user', user.id, { via: 'wechat' })
     } else {
       if (user.status !== 'active') throw forbidden('This account is not active')
-      run(
+      await run(
         `UPDATE users
             SET wechat_openid = COALESCE(?, wechat_openid),
                 wechat_unionid = COALESCE(?, wechat_unionid),
@@ -194,11 +194,11 @@ router.get(
           user.id,
         ],
       )
-      user = get('SELECT * FROM users WHERE id = ?', [user.id])
+      user = await get('SELECT * FROM users WHERE id = ?', [user.id])
     }
 
-    startSession(req, res, user)
-    record(user.id, 'login', 'session', null, { method: 'wechat', mode: config.wechat.mode })
+    await startSession(req, res, user)
+    await record(user.id, 'login', 'session', null, { method: 'wechat', mode: config.wechat.mode })
     res.redirect(302, redirect)
   }),
 )
@@ -207,18 +207,18 @@ router.get(
 
 router.post(
   '/dev-login',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     // The route does not exist at all unless AUTH_DEV=1 (docs/API.md §3.1).
     if (!config.authDev) throw notFound('Not found')
 
     const { email } = parseBody(devLoginSchema, req.body)
-    const user = get('SELECT * FROM users WHERE email = ? COLLATE NOCASE', [email])
+    const user = await get('SELECT * FROM users WHERE lower(email) = lower(?)', [email])
     if (!user) throw notFound('No such account')
     if (user.status !== 'active') throw forbidden('This account is not active')
 
-    startSession(req, res, user)
-    record(user.id, 'login', 'session', null, { method: 'dev' })
-    const fresh = get('SELECT * FROM users WHERE id = ?', [user.id])
+    await startSession(req, res, user)
+    await record(user.id, 'login', 'session', null, { method: 'dev' })
+    const fresh = await get('SELECT * FROM users WHERE id = ?', [user.id])
     res.json(sessionPayload(fresh))
   }),
 )

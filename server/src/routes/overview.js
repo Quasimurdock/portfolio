@@ -32,7 +32,7 @@ const ENTITIES = [
 
 router.get(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const counts = []
 
     for (const spec of ENTITIES) {
@@ -41,10 +41,9 @@ router.get(
       const args = scope.params
 
       const totals = new Map(
-        all(`SELECT status, COUNT(*) AS n FROM ${spec.table} WHERE ${clause} GROUP BY status`, args).map((row) => [
-          row.status,
-          row.n,
-        ]),
+        (await all(`SELECT status, COUNT(*) AS n FROM ${spec.table} WHERE ${clause} GROUP BY status`, args)).map(
+          (row) => [row.status, row.n],
+        ),
       )
       let total = 0
       for (const status of STATUSES) {
@@ -58,7 +57,7 @@ router.get(
     // My drafts / in-review rows, across every content table I own.
     const myDrafts = []
     for (const spec of ENTITIES) {
-      const rows = all(
+      const rows = await all(
         `SELECT ${spec.title} AS title, id, status, updated_at
            FROM ${spec.table}
           WHERE ${spec.column} = ? AND status IN ('draft','review')
@@ -78,20 +77,20 @@ router.get(
     }
     myDrafts.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
 
-    const recent = all(
+    const recent = (await all(
       `SELECT l.*, u.name AS user_name
          FROM audit_logs l
          LEFT JOIN users u ON u.id = l.user_id
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 10`,
-    ).map((row) => toAuditEntry(row))
+    )).map((row) => toAuditEntry(row))
 
     let users = { total: 0, byRole: [] }
     if (hasPermission(req.user, 'user.read')) {
-      const byRole = all('SELECT role_key AS role, COUNT(*) AS n FROM users GROUP BY role_key ORDER BY n DESC').map(
-        (row) => ({ role: row.role, n: row.n }),
-      )
-      const total = get('SELECT COUNT(*) AS n FROM users').n
+      const byRole = (await all(
+        'SELECT role_key AS role, COUNT(*) AS n FROM users GROUP BY role_key ORDER BY n DESC',
+      )).map((row) => ({ role: row.role, n: row.n }))
+      const total = (await get('SELECT COUNT(*) AS n FROM users')).n
       users = { total, byRole }
     }
 

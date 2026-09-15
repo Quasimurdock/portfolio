@@ -13,11 +13,11 @@ router.use(requireAuth, requirePermission('user.read'))
 
 router.get(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const requested = Number.parseInt(req.query.limit ?? '', 10)
     const limit = Number.isFinite(requested) ? Math.min(500, Math.max(1, requested)) : 50
 
-    const rows = all(
+    const rows = await all(
       `SELECT l.*, u.name AS user_name
          FROM audit_logs l
          LEFT JOIN users u ON u.id = l.user_id

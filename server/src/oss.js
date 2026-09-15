@@ -9,6 +9,7 @@
  *  - `aliyun` → OSS V1 POST policy: base64 policy + base64(HMAC-SHA1(policy)).
  */
 import crypto from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import { config } from './config.js'
 import { ApiError } from './errors.js'
 

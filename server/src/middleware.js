@@ -13,9 +13,9 @@ import { STATUSES, nowIso } from './serialize.js'
 /* -------------------------------------------------------------- identity -- */
 
 /** Populates `req.user` (or null). Never throws. */
-export function attachUser(req, _res, next) {
+export async function attachUser(req, _res, next) {
   try {
-    currentUser(req)
+    await currentUser(req)
   } catch {
     req.user = null
   }

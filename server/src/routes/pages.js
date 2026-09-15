@@ -27,24 +27,24 @@ const patchSchema = z.object({
   status: z.enum(STATUSES).optional(),
 })
 
-function loadPage(slug) {
-  return get('SELECT * FROM pages WHERE slug = ?', [slug])
+async function loadPage(slug) {
+  return await get('SELECT * FROM pages WHERE slug = ?', [slug])
 }
 
 /* ------------------------------------------------------------------ list -- */
 
 router.get(
   '/',
-  asyncHandler((_req, res) => {
-    const rows = all('SELECT * FROM pages ORDER BY slug ASC')
+  asyncHandler(async (_req, res) => {
+    const rows = await all('SELECT * FROM pages ORDER BY slug ASC')
     res.json(rows.map((row) => toPage(row)))
   }),
 )
 
 router.get(
   '/:slug',
-  asyncHandler((req, res) => {
-    const row = loadPage(req.params.slug)
+  asyncHandler(async (req, res) => {
+    const row = await loadPage(req.params.slug)
     if (!row) throw notFound('No such page')
     res.json(toPage(row))
   }),
@@ -53,8 +53,8 @@ router.get(
 router.patch(
   '/:slug',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
-    const row = loadPage(req.params.slug)
+  asyncHandler(async (req, res) => {
+    const row = await loadPage(req.params.slug)
     if (!row) throw notFound('No such page')
 
     const data = parseBody(patchSchema, req.body)
@@ -89,16 +89,16 @@ router.patch(
     if (sets.length) {
       sets.push('updated_at = ?')
       args.push(nowIso(), row.slug)
-      run(`UPDATE pages SET ${sets.join(', ')} WHERE slug = ?`, args)
+      await run(`UPDATE pages SET ${sets.join(', ')} WHERE slug = ?`, args)
     }
 
-    record(req.user.id, data.status ? 'status' : 'update', ENTITY, row.id, {
+    await record(req.user.id, data.status ? 'status' : 'update', ENTITY, row.id, {
       fields: Object.keys(data),
       ...(data.status !== undefined && data.status !== row.status
         ? { status: { from: row.status, to: data.status } }
         : {}),
     })
-    res.json(toPage(loadPage(row.slug)))
+    res.json(toPage(await loadPage(row.slug)))
   }),
 )
 

@@ -7,7 +7,7 @@
  */
 import { Router } from 'express'
 import { z } from 'zod'
-import { all, get, run } from '../db.js'
+import { all, get, insertReturningId, run } from '../db.js'
 import { record } from '../audit.js'
 import { asyncHandler, notFound, parseBody } from '../errors.js'
 import {
@@ -73,13 +73,13 @@ const SELECT_ONE = `SELECT a.*, u.name AS author_name
                       JOIN users u ON u.id = a.author_id
                      WHERE a.id = ?`
 
-function loadArticle(id) {
-  return get(SELECT_ONE, [id])
+async function loadArticle(id) {
+  return await get(SELECT_ONE, [id])
 }
 
 /** Every article response carries its resolved cover image. */
-function respond(row) {
-  const cover = row?.cover_image_id ? get('SELECT * FROM images WHERE id = ?', [row.cover_image_id]) : null
+async function respond(row) {
+  const cover = row?.cover_image_id ? await get('SELECT * FROM images WHERE id = ?', [row.cover_image_id]) : null
   return toArticle(row, { cover })
 }
 
@@ -89,7 +89,7 @@ const READ_OPTIONS = { readAll: READ_ALL, alsoAny: [`${PREFIX}.publish`] }
 
 router.get(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const where = ['1 = 1']
     const args = []
 
@@ -112,14 +112,14 @@ router.get(
     }
     if (req.query.q) {
       const term = likeTerm(req.query.q)
-      where.push(`(a.title LIKE ? ESCAPE '\\' OR a.excerpt LIKE ? ESCAPE '\\' OR a.slug LIKE ? ESCAPE '\\')`)
+      where.push(`(lower(a.title) LIKE lower(?) ESCAPE '\\' OR lower(a.excerpt) LIKE lower(?) ESCAPE '\\' OR lower(a.slug) LIKE lower(?) ESCAPE '\\')`)
       args.push(term, term, term)
     }
 
     const clause = where.join(' AND ')
-    const total = get(`SELECT COUNT(*) AS n FROM articles a WHERE ${clause}`, args).n
+    const total = (await get(`SELECT COUNT(*) AS n FROM articles a WHERE ${clause}`, args)).n
     const { page, pageSize, offset } = paging(req.query)
-    const rows = all(
+    const rows = await all(
       `SELECT a.*, u.name AS author_name
          FROM articles a
          JOIN users u ON u.id = a.author_id
@@ -138,18 +138,18 @@ router.get(
 router.post(
   '/',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const data = parseBody(createSchema, req.body)
-    requireSection(data.sectionKey)
-    requireImage(data.coverImageId ?? null)
+    await requireSection(data.sectionKey)
+    await requireImage(data.coverImageId ?? null)
 
     const status = data.status ?? 'draft'
     // Creating straight into a published state needs the publish permission.
     if (status !== 'draft') assertStatusTransition(req.user, PREFIX, status)
 
-    const slug = data.slug ?? uniqueSlug('articles', slugify(data.title))
+    const slug = data.slug ?? (await uniqueSlug('articles', slugify(data.title)))
     const now = nowIso()
-    const result = run(
+    const id = await insertReturningId(
       `INSERT INTO articles
          (slug, title, section_key, excerpt, body, cover_image_id, status, position,
           author_id, published_at, created_at, updated_at)
@@ -170,9 +170,8 @@ router.post(
       ],
     )
 
-    const id = Number(result.lastInsertRowid)
-    record(req.user.id, 'create', ENTITY, id, { slug, status, sectionKey: data.sectionKey })
-    res.status(201).json(respond(loadArticle(id)))
+    await record(req.user.id, 'create', ENTITY, id, { slug, status, sectionKey: data.sectionKey })
+    res.status(201).json(await respond(await loadArticle(id)))
   }),
 )
 
@@ -180,12 +179,12 @@ router.post(
 
 router.get(
   '/:id',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadArticle(id)
+    const row = await loadArticle(id)
     if (!row) throw notFound('No such article')
     assertCanTouch(row, req.user, { readAll: READ_ALL })
-    res.json(respond(row))
+    res.json(await respond(row))
   }),
 )
 
@@ -194,17 +193,17 @@ router.get(
 router.patch(
   '/:id',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadArticle(id)
+    const row = await loadArticle(id)
     if (!row) throw notFound('No such article')
     assertCanTouch(row, req.user, READ_OPTIONS)
 
     const data = parseBody(patchSchema, req.body)
-    if (data.sectionKey !== undefined) requireSection(data.sectionKey)
-    if (data.coverImageId !== undefined) requireImage(data.coverImageId)
+    if (data.sectionKey !== undefined) await requireSection(data.sectionKey)
+    if (data.coverImageId !== undefined) await requireImage(data.coverImageId)
     if (data.slug !== undefined && data.slug !== row.slug) {
-      data.slug = uniqueSlug('articles', data.slug, id)
+      data.slug = await uniqueSlug('articles', data.slug, id)
     }
     if (data.status !== undefined && data.status !== row.status) {
       assertStatusTransition(req.user, PREFIX, data.status)
@@ -235,17 +234,17 @@ router.patch(
     if (sets.length) {
       sets.push('updated_at = ?')
       args.push(nowIso(), id)
-      run(`UPDATE articles SET ${sets.join(', ')} WHERE id = ?`, args)
+      await run(`UPDATE articles SET ${sets.join(', ')} WHERE id = ?`, args)
     }
 
     const changed = Object.keys(data).filter((key) => data[key] !== undefined)
-    record(req.user.id, 'update', ENTITY, id, {
+    await record(req.user.id, 'update', ENTITY, id, {
       fields: changed,
       ...(data.status !== undefined && data.status !== row.status
         ? { status: { from: row.status, to: data.status } }
         : {}),
     })
-    res.json(respond(loadArticle(id)))
+    res.json(await respond(await loadArticle(id)))
   }),
 )
 
@@ -253,11 +252,11 @@ router.patch(
 
 router.post(
   '/:id/status',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
     const { status } = parseBody(statusSchema, req.body)
 
-    const row = loadArticle(id)
+    const row = await loadArticle(id)
     if (!row) throw notFound('No such article')
 
     // publish/archive -> *.publish; draft/review -> *.write
@@ -265,7 +264,7 @@ router.post(
     assertCanTouch(row, req.user, READ_OPTIONS)
 
     if (status !== row.status) {
-      run('UPDATE articles SET status = ?, published_at = ?, updated_at = ? WHERE id = ?', [
+      await run('UPDATE articles SET status = ?, published_at = ?, updated_at = ? WHERE id = ?', [
         status,
         applyPublishedAt(row.published_at, status),
         nowIso(),
@@ -274,8 +273,8 @@ router.post(
     }
 
     const action = status === 'published' ? 'publish' : status === 'archived' ? 'archive' : 'status'
-    record(req.user.id, action, ENTITY, id, { from: row.status, to: status })
-    res.json(respond(loadArticle(id)))
+    await record(req.user.id, action, ENTITY, id, { from: row.status, to: status })
+    res.json(await respond(await loadArticle(id)))
   }),
 )
 
@@ -284,14 +283,14 @@ router.post(
 router.delete(
   '/:id',
   requirePermission(`${PREFIX}.delete`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadArticle(id)
+    const row = await loadArticle(id)
     if (!row) throw notFound('No such article')
     assertCanTouch(row, req.user, READ_OPTIONS)
 
-    run('DELETE FROM articles WHERE id = ?', [id])
-    record(req.user.id, 'delete', ENTITY, id, { slug: row.slug, title: row.title, status: row.status })
+    await run('DELETE FROM articles WHERE id = ?', [id])
+    await record(req.user.id, 'delete', ENTITY, id, { slug: row.slug, title: row.title, status: row.status })
     res.status(204).end()
   }),
 )

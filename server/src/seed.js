@@ -10,7 +10,7 @@
  * BIOGRAPHY, CONTACT and FEED_ROWS — ported through the same `photo()` /
  * `seriesImages()` helpers so the public site shows exactly that material.
  */
-import { get, run, initDb, resetDatabase, tx, db } from './db.js'
+import { all, describeTarget, get, run, insertReturningId, initDb, resetDatabase, tx } from './db.js'
 import { hashPassword } from './auth.js'
 import { PERMISSIONS, ROLES } from './permissions.js'
 
@@ -314,9 +314,9 @@ function publishedAt(index) {
  * 3. Seeding
  * ========================================================================== */
 
-function upsertRoles() {
+async function upsertRoles() {
   for (const role of ROLES) {
-    run(
+    await run(
       `INSERT INTO roles (key, name, description, rank, is_system)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET
@@ -325,16 +325,19 @@ function upsertRoles() {
       [role.key, role.name, role.description, role.rank, role.isSystem],
     )
     // roles are authoritative: re-link from scratch so the matrix can't drift
-    run('DELETE FROM role_permissions WHERE role_key = ?', [role.key])
+    await run('DELETE FROM role_permissions WHERE role_key = ?', [role.key])
     for (const key of role.permissions) {
-      run('INSERT OR IGNORE INTO role_permissions (role_key, permission_key) VALUES (?, ?)', [role.key, key])
+      await run(
+        'INSERT INTO role_permissions (role_key, permission_key) VALUES (?, ?) ON CONFLICT DO NOTHING',
+        [role.key, key],
+      )
     }
   }
 }
 
-function upsertPermissions() {
+async function upsertPermissions() {
   for (const permission of PERMISSIONS) {
-    run(
+    await run(
       `INSERT INTO permissions (key, group_key, description)
        VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET
@@ -345,14 +348,14 @@ function upsertPermissions() {
 }
 
 /** @returns {Record<string, number>} email → user id */
-function upsertUsers() {
+async function upsertUsers() {
   const ids = {}
   for (const user of USERS) {
     const now = new Date().toISOString()
     const avatar = photo(`avatar-${slugify(user.email.split('@')[0])}`, 200, 1)
-    const existing = get('SELECT id FROM users WHERE email = ?', [user.email])
+    const existing = await get('SELECT id FROM users WHERE email = ?', [user.email])
     if (existing) {
-      run(
+      await run(
         `UPDATE users
             SET name = ?, role_key = ?, status = 'active', password_hash = ?, avatar_url = ?, updated_at = ?
           WHERE id = ?`,
@@ -360,20 +363,19 @@ function upsertUsers() {
       )
       ids[user.email] = existing.id
     } else {
-      const result = run(
+      ids[user.email] = await insertReturningId(
         `INSERT INTO users (email, name, avatar_url, password_hash, role_key, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
         [user.email, user.name, avatar, hashPassword(PASSWORD), user.role, now, now],
       )
-      ids[user.email] = Number(result.lastInsertRowid)
     }
   }
   return ids
 }
 
-function upsertSections() {
+async function upsertSections() {
   for (const section of SECTIONS) {
-    run(
+    await run(
       `INSERT INTO sections (key, label, kind, position, visible)
        VALUES (?, ?, ?, ?, 1)
        ON CONFLICT(key) DO UPDATE SET
@@ -384,10 +386,10 @@ function upsertSections() {
 }
 
 /** Upsert one image keyed on the schema's UNIQUE (owner_id, url). */
-function upsertImage(row) {
-  const existing = get('SELECT id FROM images WHERE owner_id = ? AND url = ?', [row.ownerId, row.url])
+async function upsertImage(row) {
+  const existing = await get('SELECT id FROM images WHERE owner_id = ? AND url = ?', [row.ownerId, row.url])
   if (existing) {
-    run(
+    await run(
       `UPDATE images
           SET collection_id = ?, thumb_url = ?, width = ?, height = ?, bytes = ?, format = ?,
               caption = ?, alt = ?, oss_provider = ?, oss_key = ?, status = ?, position = ?, updated_at = ?
@@ -399,7 +401,7 @@ function upsertImage(row) {
     )
     return existing.id
   }
-  const result = run(
+  return await insertReturningId(
     `INSERT INTO images
        (collection_id, owner_id, url, thumb_url, width, height, bytes, format, caption, alt,
         oss_provider, oss_key, status, position, created_at, updated_at)
@@ -409,13 +411,12 @@ function upsertImage(row) {
       row.caption, row.alt, row.ossProvider, row.ossKey, row.status, row.position, row.createdAt, row.updatedAt,
     ],
   )
-  return Number(result.lastInsertRowid)
 }
 
-function upsertCollection(row) {
-  const existing = get('SELECT id FROM collections WHERE slug = ?', [row.slug])
+async function upsertCollection(row) {
+  const existing = await get('SELECT id FROM collections WHERE slug = ?', [row.slug])
   if (existing) {
-    run(
+    await run(
       `UPDATE collections
           SET title = ?, section_key = ?, kind = ?, summary = ?, cover_image_id = ?, place = ?, year = ?,
               status = ?, position = ?, author_id = ?, published_at = ?, updated_at = ?
@@ -427,7 +428,7 @@ function upsertCollection(row) {
     )
     return existing.id
   }
-  const result = run(
+  return await insertReturningId(
     `INSERT INTO collections
        (slug, title, section_key, kind, summary, cover_image_id, place, year, status, position,
         author_id, published_at, created_at, updated_at)
@@ -437,13 +438,12 @@ function upsertCollection(row) {
       row.status, row.position, row.authorId, row.publishedAt, row.createdAt, row.updatedAt,
     ],
   )
-  return Number(result.lastInsertRowid)
 }
 
-function upsertArticle(row) {
-  const existing = get('SELECT id FROM articles WHERE slug = ?', [row.slug])
+async function upsertArticle(row) {
+  const existing = await get('SELECT id FROM articles WHERE slug = ?', [row.slug])
   if (existing) {
-    run(
+    await run(
       `UPDATE articles
           SET title = ?, section_key = ?, excerpt = ?, body = ?, status = ?, position = ?,
               author_id = ?, published_at = ?, updated_at = ?
@@ -455,7 +455,7 @@ function upsertArticle(row) {
     )
     return existing.id
   }
-  const result = run(
+  return await insertReturningId(
     `INSERT INTO articles
        (slug, title, section_key, excerpt, body, cover_image_id, status, position, author_id,
         published_at, created_at, updated_at)
@@ -465,13 +465,12 @@ function upsertArticle(row) {
       row.authorId, row.publishedAt, row.createdAt, row.updatedAt,
     ],
   )
-  return Number(result.lastInsertRowid)
 }
 
-function upsertPage(row) {
-  const existing = get('SELECT id FROM pages WHERE slug = ?', [row.slug])
+async function upsertPage(row) {
+  const existing = await get('SELECT id FROM pages WHERE slug = ?', [row.slug])
   if (existing) {
-    run(
+    await run(
       `UPDATE pages
           SET title = ?, kind = ?, body = ?, data = ?, status = ?, author_id = ?, published_at = ?, updated_at = ?
         WHERE id = ?`,
@@ -479,7 +478,7 @@ function upsertPage(row) {
     )
     return existing.id
   }
-  const result = run(
+  return await insertReturningId(
     `INSERT INTO pages (slug, title, kind, body, data, status, author_id, published_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -487,14 +486,13 @@ function upsertPage(row) {
       row.publishedAt, row.createdAt, row.updatedAt,
     ],
   )
-  return Number(result.lastInsertRowid)
 }
 
 /** Feed items have no natural key: match on the seeded image. */
-function upsertFeedItem(row) {
-  const existing = get('SELECT id FROM feed_items WHERE image_id = ?', [row.imageId])
+async function upsertFeedItem(row) {
+  const existing = await get('SELECT id FROM feed_items WHERE image_id = ?', [row.imageId])
   if (existing) {
-    run(
+    await run(
       `UPDATE feed_items
           SET caption = ?, link_kind = ?, link_url = ?, target_collection_id = ?, target_article_id = ?,
               status = ?, position = ?, author_id = ?, updated_at = ?
@@ -506,7 +504,7 @@ function upsertFeedItem(row) {
     )
     return existing.id
   }
-  const result = run(
+  return await insertReturningId(
     `INSERT INTO feed_items
        (image_id, caption, link_kind, link_url, target_collection_id, target_article_id,
         status, position, author_id, created_at, updated_at)
@@ -516,26 +514,26 @@ function upsertFeedItem(row) {
       row.status, row.position, row.authorId, row.createdAt, row.updatedAt,
     ],
   )
-  return Number(result.lastInsertRowid)
 }
 
 /** Resolve a legacy feed path (`/section/slug`, or `/film`) to a real target. */
-function resolveFeedTarget(path, caption) {
+async function resolveFeedTarget(path, caption) {
   const parts = String(path).split('/').filter(Boolean)
   const sectionKey = parts[0]
   const slug = parts[1]
 
   if (slug) {
-    const collection = get('SELECT id FROM collections WHERE section_key = ? AND slug = ?', [sectionKey, slug])
+    const collection = await get('SELECT id FROM collections WHERE section_key = ? AND slug = ?', [sectionKey, slug])
     if (collection) return { linkKind: 'collection', targetCollectionId: collection.id, targetArticleId: null }
-    const article = get('SELECT id FROM articles WHERE section_key = ? AND slug = ?', [sectionKey, slug])
+    const article = await get('SELECT id FROM articles WHERE section_key = ? AND slug = ?', [sectionKey, slug])
     if (article) return { linkKind: 'article', targetCollectionId: null, targetArticleId: article.id }
   }
 
   // `/film` has no slug — match the caption against the section's titles.
-  const candidates = get
-    ? db.prepare('SELECT id, title FROM collections WHERE section_key = ? ORDER BY position ASC, id ASC').all(sectionKey)
-    : []
+  const candidates = await all(
+    'SELECT id, title FROM collections WHERE section_key = ? ORDER BY position ASC, id ASC',
+    [sectionKey],
+  )
   const needle = String(caption).toLowerCase().trim()
   const match =
     candidates.find((row) => String(row.title).toLowerCase().trim() === needle) ?? candidates[0] ?? null
@@ -543,11 +541,11 @@ function resolveFeedTarget(path, caption) {
   return { linkKind: 'none', targetCollectionId: null, targetArticleId: null }
 }
 
-function seedEverything() {
-  upsertPermissions() // roles link to these, so they must exist first
-  upsertRoles()
-  const userIds = upsertUsers()
-  upsertSections()
+async function seedEverything() {
+  await upsertPermissions() // roles link to these, so they must exist first
+  await upsertRoles()
+  const userIds = await upsertUsers()
+  await upsertSections()
 
   const ownerId = userIds['owner@portfolio.test']
   const editorId = userIds['editor@portfolio.test']
@@ -561,10 +559,10 @@ function seedEverything() {
   /* ---------------------------------------------------------- collections */
   let collectionCursor = 0
 
-  const addCollection = (descriptor) => {
+  const addCollection = async (descriptor) => {
     const authorId = nextOwner()
     const now = new Date().toISOString()
-    const id = upsertCollection({
+    const id = await upsertCollection({
       slug: descriptor.slug,
       title: descriptor.title,
       sectionKey: descriptor.sectionKey,
@@ -584,9 +582,9 @@ function seedEverything() {
 
     /* -------------------------------------------------------------- images */
     const imageIds = []
-    descriptor.images.forEach((image, index) => {
+    for (const [index, image] of descriptor.images.entries()) {
       imageIds.push(
-        upsertImage({
+        await upsertImage({
           collectionId: id,
           ownerId: authorId,
           url: image.url,
@@ -605,17 +603,17 @@ function seedEverything() {
           updatedAt: now,
         }),
       )
-    })
+    }
 
     if (imageIds.length) {
-      run('UPDATE collections SET cover_image_id = ? WHERE id = ?', [imageIds[0], id])
+      await run('UPDATE collections SET cover_image_id = ? WHERE id = ?', [imageIds[0], id])
     }
     return id
   }
 
   /* grid sections built out of [title, count] pairs — legacy `makeSeries` */
   for (const [sectionKey, pairs] of Object.entries(SECTION_ROWS)) {
-    pairs.forEach(([title, count], index) => {
+    for (const [index, [title, count]] of pairs.entries()) {
       const slug = slugify(title)
       const seed = `${slug}-${index}`
       const total = Math.min(count, 24) // legacy caps a series at 24 frames
@@ -636,7 +634,7 @@ function seedEverything() {
         }
       })
 
-      addCollection({
+      await addCollection({
         slug,
         title,
         sectionKey,
@@ -647,13 +645,13 @@ function seedEverything() {
         year: images[0]?.year ?? null,
         images,
       })
-    })
+    }
   }
 
   /* film — one frame each, slugs namespaced so they can't collide with a series */
-  FILM_ROWS.forEach(([title, duration], index) => {
+  for (const [index, [title, duration]] of FILM_ROWS.entries()) {
     const seed = `film-${slugify(title)}`
-    addCollection({
+    await addCollection({
       slug: `film-${slugify(title)}`,
       title,
       sectionKey: 'film',
@@ -670,12 +668,12 @@ function seedEverything() {
         },
       ],
     })
-  })
+  }
 
   /* monographs — likewise namespaced with the legacy `book-` seed prefix */
-  MONOGRAPH_ROWS.forEach(([title, publisher, year], index) => {
+  for (const [index, [title, publisher, year]] of MONOGRAPH_ROWS.entries()) {
     const seed = `book-${slugify(title)}`
-    addCollection({
+    await addCollection({
       slug: `book-${slugify(title)}`,
       title,
       sectionKey: 'monographs',
@@ -694,14 +692,14 @@ function seedEverything() {
         },
       ],
     })
-  })
+  }
 
   /* ------------------------------------------------------------- articles */
   let articleCursor = 0
   for (const [sectionKey, rows] of Object.entries(LIST_ROWS)) {
-    rows.forEach((row, index) => {
+    for (const [index, row] of rows.entries()) {
       const authorId = nextOwner()
-      upsertArticle({
+      await upsertArticle({
         slug: `${slugify(row.title)}-${index}`,
         title: row.title,
         sectionKey,
@@ -715,11 +713,11 @@ function seedEverything() {
         updatedAt: new Date().toISOString(),
       })
       articleCursor += 1
-    })
+    }
   }
 
   /* ---------------------------------------------------------- single pages */
-  upsertPage({
+  await upsertPage({
     slug: 'biography',
     title: 'Biography',
     kind: 'article',
@@ -732,7 +730,7 @@ function seedEverything() {
     updatedAt: new Date().toISOString(),
   })
 
-  upsertPage({
+  await upsertPage({
     slug: 'contact',
     title: 'Contact',
     kind: 'contact',
@@ -746,13 +744,13 @@ function seedEverything() {
   })
 
   /* ----------------------------------------------------------- home feed */
-  FEED_ROWS.forEach((row, index) => {
+  for (const [index, row] of FEED_ROWS.entries()) {
     const [caption, path] = row
     const seed = `feed-${index}`
     const ratio = index % 3 === 1 ? 0.7 : 1.28
     const now = new Date().toISOString()
 
-    const imageId = upsertImage({
+    const imageId = await upsertImage({
       collectionId: null,
       ownerId,
       url: photo(seed, 1440, ratio),
@@ -771,8 +769,8 @@ function seedEverything() {
       updatedAt: now,
     })
 
-    const target = resolveFeedTarget(path, caption)
-    upsertFeedItem({
+    const target = await resolveFeedTarget(path, caption)
+    await upsertFeedItem({
       imageId,
       caption,
       linkKind: target.linkKind,
@@ -785,40 +783,40 @@ function seedEverything() {
       createdAt: now,
       updatedAt: now,
     })
-  })
+  }
 }
 
 /* ==========================================================================
  * 4. Entry point
  * ========================================================================== */
 
-function summary() {
-  const count = (sql, params = []) => Number(db.prepare(sql).get(...params).n)
+async function summary() {
+  const count = async (sql, params = []) => Number((await get(sql, params)).n)
   return {
-    roles: count('SELECT COUNT(*) AS n FROM roles'),
-    permissions: count('SELECT COUNT(*) AS n FROM permissions'),
-    rolePermissions: count('SELECT COUNT(*) AS n FROM role_permissions'),
-    sections: count('SELECT COUNT(*) AS n FROM sections'),
-    users: count('SELECT COUNT(*) AS n FROM users'),
-    collections: count('SELECT COUNT(*) AS n FROM collections'),
-    images: count('SELECT COUNT(*) AS n FROM images'),
-    articles: count('SELECT COUNT(*) AS n FROM articles'),
-    feedItems: count('SELECT COUNT(*) AS n FROM feed_items'),
-    pages: count('SELECT COUNT(*) AS n FROM pages'),
-    published: count("SELECT COUNT(*) AS n FROM articles WHERE status = 'published'"),
+    roles: await count('SELECT COUNT(*) AS n FROM roles'),
+    permissions: await count('SELECT COUNT(*) AS n FROM permissions'),
+    rolePermissions: await count('SELECT COUNT(*) AS n FROM role_permissions'),
+    sections: await count('SELECT COUNT(*) AS n FROM sections'),
+    users: await count('SELECT COUNT(*) AS n FROM users'),
+    collections: await count('SELECT COUNT(*) AS n FROM collections'),
+    images: await count('SELECT COUNT(*) AS n FROM images'),
+    articles: await count('SELECT COUNT(*) AS n FROM articles'),
+    feedItems: await count('SELECT COUNT(*) AS n FROM feed_items'),
+    pages: await count('SELECT COUNT(*) AS n FROM pages'),
+    published: await count("SELECT COUNT(*) AS n FROM articles WHERE status = 'published'"),
   }
 }
 
-function main() {
+async function main() {
   if (RESET) {
-    resetDatabase()
-    console.log('database reset — every table dropped and recreated from schema.sql')
+    await resetDatabase()
+    console.log(`database reset (${describeTarget()}) — every table dropped and recreated from the schema`)
   } else {
-    initDb()
+    await initDb()
   }
 
-  tx(seedEverything)
-  const counts = summary()
+  await tx(seedEverything)
+  const counts = await summary()
 
   console.log(
     [
@@ -832,4 +830,4 @@ function main() {
   )
 }
 
-main()
+await main()

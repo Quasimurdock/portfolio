@@ -6,6 +6,7 @@
  * - cookies: `value.hmac-sha256(value)` so a tampered cookie is simply ignored
  */
 import crypto from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import { config } from './config.js'
 import { get, run } from './db.js'
 
@@ -124,11 +125,11 @@ export function sha256(value) {
  * Mint a session for `userId` and return the raw cookie token (never stored).
  * @returns {{ token: string, expiresAt: string }}
  */
-export function createSession(userId, { userAgent = null, ip = null } = {}) {
+export async function createSession(userId, { userAgent = null, ip = null } = {}) {
   const token = crypto.randomBytes(32).toString('base64url')
   const now = new Date()
   const expires = new Date(now.getTime() + config.sessionTtlDays * DAY_MS)
-  run(
+  await run(
     `INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent, ip)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [sha256(token), userId, now.toISOString(), expires.toISOString(), trim(userAgent, 300), trim(ip, 64)],
@@ -142,18 +143,18 @@ function trim(value, max) {
   return text.length > max ? text.slice(0, max) : text
 }
 
-export function revokeSession(token) {
+export async function revokeSession(token) {
   if (!token) return 0
-  return run('DELETE FROM sessions WHERE token_hash = ?', [sha256(token)]).changes
+  return (await run('DELETE FROM sessions WHERE token_hash = ?', [sha256(token)])).changes
 }
 
-export function revokeAllSessions(userId) {
-  return run('DELETE FROM sessions WHERE user_id = ?', [userId]).changes
+export async function revokeAllSessions(userId) {
+  return (await run('DELETE FROM sessions WHERE user_id = ?', [userId])).changes
 }
 
-export function pruneExpiredSessions() {
+export async function pruneExpiredSessions() {
   try {
-    return run('DELETE FROM sessions WHERE expires_at <= ?', [new Date().toISOString()]).changes
+    return (await run('DELETE FROM sessions WHERE expires_at <= ?', [new Date().toISOString()])).changes
   } catch {
     return 0
   }
@@ -169,7 +170,7 @@ export function sessionTokenFrom(req) {
  * Resolve the caller. Returns the user row (with `permissions`) or null.
  * Anonymous, forged, expired and disabled sessions all collapse to null.
  */
-export function currentUser(req) {
+export async function currentUser(req) {
   if (req.__userResolved) return req.user
   req.__userResolved = true
   req.user = null
@@ -180,7 +181,7 @@ export function currentUser(req) {
   const tokenHash = sha256(token)
   let row
   try {
-    row = get(
+    row = await get(
       `SELECT s.token_hash, s.expires_at,
               u.id, u.email, u.name, u.avatar_url, u.role_key, u.status,
               u.wechat_nickname, u.wechat_avatar, u.created_at, u.last_login_at
@@ -195,7 +196,7 @@ export function currentUser(req) {
 
   if (!row) return null
   if (row.expires_at <= new Date().toISOString()) {
-    run('DELETE FROM sessions WHERE token_hash = ?', [tokenHash])
+    await run('DELETE FROM sessions WHERE token_hash = ?', [tokenHash])
     return null
   }
   if (row.status !== 'active') return null

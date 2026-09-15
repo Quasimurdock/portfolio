@@ -4,18 +4,30 @@ A photographic portfolio and the studio back office that publishes it: two deplo
 
 ```
 web/      Vite + Vue 3 + TypeScript  — the public site and /admin in one SPA
-server/   Node + Express + SQLite    — JSON API, sessions, RBAC, OSS signing, WeChat login
+server/   Deno + Express             — JSON API, sessions, RBAC, OSS signing, WeChat login
+          SQLite locally, Postgres on Deno Deploy (docs/DENO-PORT.md)
 legacy/   the original single-file build, kept for reference
 docs/     API.md — data model and HTTP contract (read this first)
 ```
 
 ## Quick start
 
+The API runs on **Deno >= 2.2** — which is what the npm scripts below use — or on
+Node >= 22.5. Node 20 will not work: the `node:sqlite` module it depends on only
+exists from Node 22.5, so there is no native addon to compile any more but the
+runtime floor moved up.
+
 ```bash
 npm install          # installs both workspaces
 npm run seed         # creates server/data/app.db and fills it with the demo content
 npm run dev          # API on :8787, web on :5173 (Vite proxies /api)
 ```
+
+Run the equivalent through Deno directly with `cd server && deno task seed && deno task dev`.
+
+Switching the database is a `DB_DRIVER` change, not a code change — SQLite for local
+development and self-hosting, Postgres for Deno Deploy. See
+**[docs/DENO-PORT.md](docs/DENO-PORT.md)** for what that involves and why.
 
 Open <http://localhost:5173> for the site and <http://localhost:5173/admin> for the back office.
 
@@ -84,11 +96,15 @@ Sections drive the public navigation, and each section declares how it renders �
 `server/.env.example` documents everything. The ones that matter:
 
 ```
-PORT=8787                 DATABASE_FILE=./data/app.db        SESSION_TTL_DAYS=14
+PORT=8787                 DB_DRIVER=sqlite                  SESSION_TTL_DAYS=14
 COOKIE_SECRET=change-me   AUTH_DEV=1                          # disable in production
 OSS_PROVIDER=mock         OSS_PUBLIC_BASE=https://cdn.example.com
-WECHAT_MODE=qrconnect     WECHAT_MOCK=1                       # real appid/secret for production
+WECHAT_MODE=qrconnect     WECHAT_APP_ID=                      # mock follows the app id
 ```
+
+`DB_DRIVER=postgres` additionally reads `DATABASE_URL`, or the standard
+`PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` / `PGDATABASE` variables that Deno
+Deploy injects when a database is attached.
 
 ## WeChat login
 

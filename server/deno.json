@@ -1,0 +1,10 @@
+{
+  "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+  "tasks": {
+    "dev": "deno run --allow-all --watch src/index.js",
+    "start": "deno run --allow-all src/index.js",
+    "seed": "deno run --allow-all src/seed.js",
+    "reset": "deno run --allow-all src/seed.js --reset",
+    "cli": "deno run --allow-all src/cli.js"
+  }
+}

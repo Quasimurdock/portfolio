@@ -15,10 +15,10 @@ router.use(requireAuth, requirePermission('user.read'))
 
 router.get(
   '/',
-  asyncHandler((_req, res) => {
-    const roles = all('SELECT * FROM roles ORDER BY rank DESC, key ASC')
-    const links = all('SELECT role_key, permission_key FROM role_permissions')
-    const permissions = all('SELECT * FROM permissions ORDER BY group_key ASC, key ASC')
+  asyncHandler(async (_req, res) => {
+    const roles = await all('SELECT * FROM roles ORDER BY rank DESC, key ASC')
+    const links = await all('SELECT role_key, permission_key FROM role_permissions')
+    const permissions = await all('SELECT * FROM permissions ORDER BY group_key ASC, key ASC')
 
     res.json({
       roles: roles.map((role) =>

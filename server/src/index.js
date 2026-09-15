@@ -12,7 +12,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { config } from './config.js'
-import { initDb } from './db.js'
+import { describeTarget, initDb } from './db.js'
 import { parseCookies, pruneExpiredSessions } from './auth.js'
 import { attachUser } from './middleware.js'
 import { ApiError } from './errors.js'
@@ -155,13 +155,13 @@ app.use((err, req, res, _next) => {
 
 /* ------------------------------------------------------------------ start -- */
 
-export function start() {
-  initDb()
-  const pruned = pruneExpiredSessions()
+export async function start() {
+  await initDb()
+  const pruned = await pruneExpiredSessions()
   const server = app.listen(config.port, () => {
     console.log(`portfolio api listening on http://localhost:${config.port}`)
     console.log(
-      `  db=${config.databaseFile} oss=${config.oss.provider} wechat=${config.wechat.mode}${config.wechat.mock ? ' (mock)' : ''} authDev=${config.authDev ? 1 : 0}`,
+      `  db=${describeTarget()} oss=${config.oss.provider} wechat=${config.wechat.mode}${config.wechat.mock ? ' (mock)' : ''} authDev=${config.authDev ? 1 : 0}`,
     )
     console.log(
       servingSite
@@ -173,5 +173,10 @@ export function start() {
   return server
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
-if (isMain) start()
+// `import.meta.main` is Deno's (and Node 24+'s) "was this file run directly?";
+// comparing `process.argv[1]` is the older Node-only fallback, and its semantics
+// differ under Deno, so it is only consulted when `import.meta.main` is absent.
+const isMain =
+  import.meta.main ?? (Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href)
+
+if (isMain) await start()

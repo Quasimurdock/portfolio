@@ -16,30 +16,30 @@ export function parseId(value, label = 'id') {
 }
 
 /** The section must exist — `articles.section_key` / `collections.section_key` are FKs. */
-export function requireSection(sectionKey) {
-  const section = get('SELECT key, label, kind FROM sections WHERE key = ?', [sectionKey])
+export async function requireSection(sectionKey) {
+  const section = await get('SELECT key, label, kind FROM sections WHERE key = ?', [sectionKey])
   if (!section) throw badRequest(`Unknown section: ${sectionKey}`, { sectionKey })
   return section
 }
 
-/** A referenced image must exist, otherwise SQLite would raise an FK error. */
-export function requireImage(imageId, field = 'coverImageId') {
+/** A referenced image must exist, otherwise the FK would raise. */
+export async function requireImage(imageId, field = 'coverImageId') {
   if (imageId === null || imageId === undefined) return null
-  const image = get('SELECT * FROM images WHERE id = ?', [imageId])
+  const image = await get('SELECT * FROM images WHERE id = ?', [imageId])
   if (!image) throw badRequest(`Unknown ${field}: ${imageId}`, { [field]: imageId })
   return image
 }
 
 /** `base`, `base-2`, `base-3`, … — never collides with an existing slug. */
-export function uniqueSlug(table, base, ignoreId = null) {
+export async function uniqueSlug(table, base, ignoreId = null) {
   const stem = base || 'untitled'
   let candidate = stem
   let suffix = 2
   for (;;) {
     const row =
       ignoreId === null
-        ? get(`SELECT id FROM ${table} WHERE slug = ?`, [candidate])
-        : get(`SELECT id FROM ${table} WHERE slug = ? AND id <> ?`, [candidate, ignoreId])
+        ? await get(`SELECT id FROM ${table} WHERE slug = ?`, [candidate])
+        : await get(`SELECT id FROM ${table} WHERE slug = ? AND id <> ?`, [candidate, ignoreId])
     if (!row) return candidate
     candidate = `${stem}-${suffix++}`
   }

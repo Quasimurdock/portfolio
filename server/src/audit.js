@@ -13,9 +13,9 @@ import { run } from './db.js'
  * @param {number|null} entityId
  * @param {Record<string, unknown>} [meta]
  */
-export function record(userId, action, entity, entityId = null, meta = {}) {
+export async function record(userId, action, entity, entityId = null, meta = {}) {
   try {
-    run(
+    await run(
       `INSERT INTO audit_logs (user_id, action, entity, entity_id, meta, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [

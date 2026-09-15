@@ -6,7 +6,7 @@
  */
 import { Router } from 'express'
 import { z } from 'zod'
-import { all, get, run, tx } from '../db.js'
+import { all, get, insertReturningId, isUniqueViolation, run, tx } from '../db.js'
 import { record } from '../audit.js'
 import { asyncHandler, badRequest, conflict, notFound, parseBody } from '../errors.js'
 import {
@@ -84,13 +84,13 @@ const reorderSchema = z.object({
   ids: z.array(z.number().int().positive()).max(1000),
 })
 
-function loadImage(id) {
-  return get('SELECT * FROM images WHERE id = ?', [id])
+async function loadImage(id) {
+  return await get('SELECT * FROM images WHERE id = ?', [id])
 }
 
-function requireCollection(collectionId) {
+async function requireCollection(collectionId) {
   if (collectionId === null || collectionId === undefined) return null
-  const collection = get('SELECT * FROM collections WHERE id = ?', [collectionId])
+  const collection = await get('SELECT * FROM collections WHERE id = ?', [collectionId])
   if (!collection) throw badRequest(`Unknown collectionId: ${collectionId}`, { collectionId })
   return collection
 }
@@ -99,7 +99,7 @@ function requireCollection(collectionId) {
 
 router.get(
   '/',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const where = ['1 = 1']
     const args = []
 
@@ -127,14 +127,16 @@ router.get(
 
     if (req.query.q) {
       const term = likeTerm(req.query.q)
-      where.push(`(i.caption LIKE ? ESCAPE '\\' OR i.alt LIKE ? ESCAPE '\\' OR i.url LIKE ? ESCAPE '\\')`)
+      where.push(
+        `(lower(i.caption) LIKE lower(?) ESCAPE '\\' OR lower(i.alt) LIKE lower(?) ESCAPE '\\' OR lower(i.url) LIKE lower(?) ESCAPE '\\')`,
+      )
       args.push(term, term, term)
     }
 
     const clause = where.join(' AND ')
-    const total = get(`SELECT COUNT(*) AS n FROM images i WHERE ${clause}`, args).n
+    const total = (await get(`SELECT COUNT(*) AS n FROM images i WHERE ${clause}`, args)).n
     const { page, pageSize, offset } = paging(req.query)
-    const rows = all(
+    const rows = await all(
       `SELECT i.* FROM images i WHERE ${clause} ORDER BY i.position ASC, i.id ASC LIMIT ? OFFSET ?`,
       [...args, pageSize, offset],
     )
@@ -148,25 +150,25 @@ router.get(
 router.post(
   '/reorder',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const { collectionId, ids } = parseBody(reorderSchema, req.body)
-    const collection = requireCollection(collectionId)
+    const collection = await requireCollection(collectionId)
     if (collection) {
       assertCanTouch(collection, req.user, { readAll: 'content.collection.read_all', alsoAny: ['content.collection.publish'] })
     }
 
     const touched = []
-    tx(() => {
-      ids.forEach((id, index) => {
-        const row = loadImage(id)
+    await tx(async () => {
+      for (const [index, id] of ids.entries()) {
+        const row = await loadImage(id)
         if (!row) throw badRequest(`Unknown image id: ${id}`, { id })
         assertCanTouch(row, req.user, READ_OPTIONS)
-        run('UPDATE images SET position = ?, updated_at = ? WHERE id = ?', [index, nowIso(), id])
+        await run('UPDATE images SET position = ?, updated_at = ? WHERE id = ?', [index, nowIso(), id])
         touched.push(id)
-      })
+      }
     })
 
-    record(req.user.id, 'reorder', ENTITY, collectionId, { collectionId, ids })
+    await record(req.user.id, 'reorder', ENTITY, collectionId, { collectionId, ids })
     res.json({ ok: true, ids: touched })
   }),
 )
@@ -176,17 +178,17 @@ router.post(
 router.post(
   '/',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const data = parseBody(createSchema, req.body)
-    requireCollection(data.collectionId ?? null)
+    await requireCollection(data.collectionId ?? null)
 
     const now = nowIso()
     const status = data.status ?? 'published'
     assertStatusTransition(req.user, null, status) // images have no *.publish key
 
-    let result
+    let id
     try {
-      result = run(
+      id = await insertReturningId(
         `INSERT INTO images
            (collection_id, owner_id, url, thumb_url, width, height, bytes, format, caption, alt,
             oss_provider, oss_key, status, position, created_at, updated_at)
@@ -211,15 +213,14 @@ router.post(
         ],
       )
     } catch (error) {
-      if (String(error.message).includes('UNIQUE')) {
+      if (isUniqueViolation(error)) {
         throw conflict('You already have an image with that URL', { url: data.url })
       }
       throw error
     }
 
-    const id = Number(result.lastInsertRowid)
-    record(req.user.id, 'create', ENTITY, id, { url: data.url, collectionId: data.collectionId ?? null })
-    res.status(201).json(toImage(loadImage(id)))
+    await record(req.user.id, 'create', ENTITY, id, { url: data.url, collectionId: data.collectionId ?? null })
+    res.status(201).json(toImage(await loadImage(id)))
   }),
 )
 
@@ -227,9 +228,9 @@ router.post(
 
 router.get(
   '/:id',
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadImage(id)
+    const row = await loadImage(id)
     if (!row) throw notFound('No such image')
     assertCanTouch(row, req.user, READ_OPTIONS)
     res.json(toImage(row))
@@ -241,14 +242,14 @@ router.get(
 router.patch(
   '/:id',
   requirePermission(`${PREFIX}.write`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadImage(id)
+    const row = await loadImage(id)
     if (!row) throw notFound('No such image')
     assertCanTouch(row, req.user, READ_OPTIONS)
 
     const data = parseBody(patchSchema, req.body)
-    if (data.collectionId !== undefined) requireCollection(data.collectionId)
+    if (data.collectionId !== undefined) await requireCollection(data.collectionId)
 
     const sets = []
     const args = []
@@ -276,22 +277,22 @@ router.patch(
       sets.push('updated_at = ?')
       args.push(nowIso(), id)
       try {
-        run(`UPDATE images SET ${sets.join(', ')} WHERE id = ?`, args)
+        await run(`UPDATE images SET ${sets.join(', ')} WHERE id = ?`, args)
       } catch (error) {
-        if (String(error.message).includes('UNIQUE')) {
+        if (isUniqueViolation(error)) {
           throw conflict('You already have an image with that URL', { url: data.url })
         }
         throw error
       }
     }
 
-    record(req.user.id, 'update', ENTITY, id, {
+    await record(req.user.id, 'update', ENTITY, id, {
       fields: Object.keys(data),
       ...(data.status !== undefined && data.status !== row.status
         ? { status: { from: row.status, to: data.status } }
         : {}),
     })
-    res.json(toImage(loadImage(id)))
+    res.json(toImage(await loadImage(id)))
   }),
 )
 
@@ -300,14 +301,14 @@ router.patch(
 router.delete(
   '/:id',
   requirePermission(`${PREFIX}.delete`),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const id = parseId(req.params.id)
-    const row = loadImage(id)
+    const row = await loadImage(id)
     if (!row) throw notFound('No such image')
     assertCanTouch(row, req.user, READ_OPTIONS)
 
-    run('DELETE FROM images WHERE id = ?', [id])
-    record(req.user.id, 'delete', ENTITY, id, { url: row.url, collectionId: row.collection_id })
+    await run('DELETE FROM images WHERE id = ?', [id])
+    await record(req.user.id, 'delete', ENTITY, id, { url: row.url, collectionId: row.collection_id })
     res.status(204).end()
   }),
 )

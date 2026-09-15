@@ -47,10 +47,10 @@ router.post(
   '/sign',
   requireAuth,
   requirePermission('media.upload'),
-  asyncHandler((req, res) => {
+  asyncHandler(async (req, res) => {
     const input = parseBody(signSchema, req.body)
     const ticket = signUpload(input)
-    record(req.user.id, 'sign', 'upload', null, {
+    await record(req.user.id, 'sign', 'upload', null, {
       key: ticket.key,
       provider: ticket.provider,
       bytes: input.size,

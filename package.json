@@ -2,7 +2,7 @@
   "name": "portfolio",
   "private": true,
   "version": "2.0.0",
-  "description": "Photographic portfolio — public site + studio back office (Vite/Vue 3 + Node/SQLite)",
+  "description": "Photographic portfolio — public site + studio back office (Vite/Vue 3; Deno + Express on SQLite or Postgres)",
   "type": "module",
   "workspaces": [
     "server",

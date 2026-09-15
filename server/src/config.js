@@ -71,13 +71,35 @@ const port = int('PORT', 8787)
 const databaseFile = str('DATABASE_FILE', './data/app.db')
 const staticDir = str('STATIC_DIR', '../web/dist')
 const wechatAppId = str('WECHAT_APP_ID', '')
+const dbDriver = str('DB_DRIVER', 'sqlite').toLowerCase() === 'postgres' ? 'postgres' : 'sqlite'
+const databaseUrl = str('DATABASE_URL', '')
 
 export const config = {
   env: str('NODE_ENV', 'development'),
   isProduction: str('NODE_ENV', 'development') === 'production',
   port,
   serverRoot: SERVER_ROOT,
+  /**
+   * `sqlite` (default) or `postgres`.
+   *
+   * Deno Deploy gives each instance its own isolated, ephemeral disk, so a
+   * SQLite file cannot be the source of truth there — a deployment on Deno
+   * Deploy runs `DB_DRIVER=postgres` against an attached database. Locally and
+   * self-hosted, the default keeps working with no server at all.
+   */
+  dbDriver,
   databaseFile: path.isAbsolute(databaseFile) ? databaseFile : path.resolve(SERVER_ROOT, databaseFile),
+  /**
+   * Postgres connection string. Leave it empty to let `pg` read the standard
+   * `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` / `PGDATABASE` variables that
+   * Deno Deploy injects when a database is attached to the app.
+   */
+  databaseUrl,
+  /** Apply the schema on boot. Turn off once a migration step owns the schema. */
+  dbAutoSchema: bool('DB_AUTO_SCHEMA', true),
+  pgPoolMax: int('PG_POOL_MAX', 5),
+  /** `''` | `require` (verify the cert) | `no-verify` (accept a self-signed one). */
+  pgSsl: str('PGSSL', ''),
   /**
    * The built SPA (`web/dist`). Served from this same process — and therefore the
    * same origin as the API — whenever it exists, which is what makes a single
