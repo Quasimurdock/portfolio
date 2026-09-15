@@ -15,12 +15,48 @@ VPS
 
 ---
 
+## What the VPS needs
+
+* **1 vCPU, 1 GB RAM, 10 GB disk** is comfortable. 512 MB is not: the image build runs Vite, which gets OOM-killed.
+  Debian 12 or Ubuntu 22.04+ are the safe choices.
+* **Docker with the Compose v2 plugin.** The compose file uses v2 syntax, so the old Python `docker-compose` will not
+  work. Install with:
+
+  ```bash
+  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker "$USER" && newgrp docker     # or prefix everything with sudo
+  docker compose version                               # must print "Docker Compose version v2.x"
+  ```
+
+* **Ports 80 and 443 open — in the host firewall *and* in your provider's security group**, if it has one. This is
+  the single most common reason the certificate never issues. Nothing else needs to be open: the app port 8787 is
+  published on loopback only.
+
+  ```bash
+  sudo ufw allow 80,443/tcp        # if ufw is enabled
+  ```
+
+* **A domain with an A record pointing at the VPS**, which you need for automatic HTTPS and later for WeChat. You can
+  dry-run on the bare IP first (below).
+
+## Getting the code
+
+```bash
+git clone https://github.com/Quasimurdock/portfolio.git
+cd portfolio
+```
+
+The repository is public, so no credentials are needed on the server. (For a private copy, add a deploy key and clone
+over `git@github.com:…` instead.)
+
+---
+
 ## The short version
 
 On a VPS with Docker (and a domain whose A record already points at it):
 
 ```bash
-git clone <your repo> portfolio && cd portfolio
+git clone https://github.com/Quasimurdock/portfolio.git portfolio && cd portfolio
 cp deploy/.env.example .env      # set DOMAIN and COOKIE_SECRET
 docker compose up -d --build
 ```
@@ -62,6 +98,23 @@ docker compose exec app node scripts/smoke.mjs     # expects 36 passed, 0 failed
 Health check, if you prefer curl: `curl -s localhost:8787/api/health` → `{"ok":true,...}` (the app port is published
 on loopback only, so it is not reachable from outside).
 
+### Want to see it before touching DNS? Dry-run on the IP
+
+Caddy cannot get a certificate for a bare IP, so serve plain HTTP for the test — and **turn Secure cookies off**
+while you do, because with `HTTPS=1` the browser silently drops the session cookie over HTTP and sign-in looks
+broken (you land back on the login page with no error):
+
+```bash
+sed -i 's/^HTTPS=.*/HTTPS=0/' .env                 # otherwise login silently fails over HTTP
+sed -i 's/^DOMAIN=.*/DOMAIN=:80/' .env             # ":80" = plain HTTP, no certificate
+docker compose up -d --build
+curl -s localhost:8787/api/health                  # from the box
+# then browse http://<your-vps-ip>/
+```
+
+Move back to the real thing once DNS resolves: set `DOMAIN=your.domain`, `HTTPS=1`, and `docker compose up -d`
+again (Caddy will fetch the certificate).
+
 ---
 
 ## Without Docker
@@ -70,7 +123,7 @@ Works the same way on a bare VPS — Node 20 and Caddy, no containers:
 
 ```bash
 sudo useradd --system --create-home --home-dir /srv/portfolio portfolio
-sudo -u portfolio git clone <your repo> /srv/portfolio
+sudo -u portfolio git clone https://github.com/Quasimurdock/portfolio.git /srv/portfolio
 cd /srv/portfolio
 sudo -u portfolio npm ci
 sudo -u portfolio npm --workspace web run build     # writes web/dist — the site the API serves
@@ -133,6 +186,19 @@ The server never stores image bytes; it signs uploads. With `OSS_PROVIDER=mock` 
 only records URLs. For real uploads set `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_BUCKET`, `OSS_REGION`
 and `OSS_PUBLIC_BASE`, then allow the admin origin in the bucket's CORS rules — the browser posts the file straight
 to the bucket.
+
+## Troubleshooting
+
+| symptom | what it is |
+|---|---|
+| Caddy logs `no such host`, or the certificate never issues | the A record does not point at this box yet, or 80/443 are closed upstream (provider security group, not just ufw) |
+| `bind: address already in use` on 80/443 | the VPS image ships nginx or apache: `sudo systemctl disable --now nginx` |
+| `docker compose` → "is not a docker command" | only the legacy `docker-compose` is installed; you need the v2 plugin |
+| Sign-in appears to do nothing, you bounce back to the login page | the cookie is `Secure` but you are on plain HTTP — set `HTTPS=0` (see the IP dry-run above) |
+| `docker compose exec app …` → "service is not running" | the app is restarting because of a boot error: `docker compose logs app` |
+| The image build is very slow, or fails fetching packages | the repo ships `.npmrc` pointing at a Chinese mirror. It works worldwide, but if you would rather use the default registry, delete the `COPY … .npmrc` line in the `Dockerfile` |
+| Build killed, exit code 137 | out of memory — Vite needs roughly 1 GB to build |
+| Everything works but the site is empty | expected after `cli wipe-content`, or if you have only saved drafts: the public API serves **published** rows only. Add and publish content in `/admin` |
 
 ## Known limits
 
