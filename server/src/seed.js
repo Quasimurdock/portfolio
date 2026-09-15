@@ -586,6 +586,8 @@ export async function seedEverything() {
 
   /* ---------------------------------------------------------- collections */
   let collectionCursor = 0
+  let collectionsDone = 0
+  let imagesDone = 0
 
   const addCollection = async (descriptor) => {
     const authorId = nextOwner()
@@ -635,6 +637,16 @@ export async function seedEverything() {
 
     if (imageIds.length) {
       await run('UPDATE collections SET cover_image_id = ? WHERE id = ?', [imageIds[0], id])
+    }
+
+    // This phase is ~2000 individually round-tripped statements, so against a
+    // remote database it is minutes long. Without a heartbeat the log simply
+    // stops after "seeding the demo content" and the run looks hung — which is
+    // exactly how it read the first time it was run for real.
+    collectionsDone += 1
+    imagesDone += imageIds.length
+    if (collectionsDone % 10 === 0) {
+      console.log(`  … ${collectionsDone} collections, ${imagesDone} images`)
     }
     return id
   }
