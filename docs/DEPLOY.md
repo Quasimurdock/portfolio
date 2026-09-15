@@ -174,9 +174,10 @@ bucket separately (or enable versioning on it).
 1. Register the domain in the WeChat 开放平台 console (网站应用 for QR sign-in, or 公众号 for in-app).
 2. Set `WECHAT_APP_ID`, `WECHAT_APP_SECRET`, and
    `WECHAT_REDIRECT_URI=https://DOMAIN/api/auth/wechat/callback`.
-3. Delete `WECHAT_MOCK` (or set it to `0`). Mock mode is automatic **only while `WECHAT_APP_ID` is empty** — once
-   a real app id is present the callback really calls `api.weixin.qq.com`, which is what you want in production and
-   what will fail with `invalid appid` (HTTP 502) if the credentials are wrong.
+3. **Leave `WECHAT_MOCK` unset.** It follows `WECHAT_APP_ID` on its own: while the app id is empty mock is on (so a
+   fresh deploy works with no credentials at all), and once a real app id is present the callback really calls
+   `api.weixin.qq.com`. Setting `WECHAT_MOCK=0` with an empty app id breaks the callback with
+   `wechat_not_configured` (HTTP 500) — the most common false alarm on a new deployment.
 4. New WeChat users are created with `WECHAT_DEFAULT_ROLE` (`author`): they can write their own drafts but cannot
    publish.
 
@@ -195,6 +196,7 @@ to the bucket.
 | `bind: address already in use` on 80/443 | the VPS image ships nginx or apache: `sudo systemctl disable --now nginx` |
 | `docker compose` → "is not a docker command" | only the legacy `docker-compose` is installed; you need the v2 plugin |
 | Sign-in appears to do nothing, you bounce back to the login page | the cookie is `Secure` but you are on plain HTTP — set `HTTPS=0` (see the IP dry-run above) |
+| The smoke test's two WeChat checks fail (`HTTP 500`, then `unauthorized`) | `WECHAT_MOCK=0` while `WECHAT_APP_ID` is empty, so the callback tries to reach WeChat with no credentials. Comment the line out and `docker compose up -d --force-recreate app`; `docker compose logs app` says `wechat_not_configured` |
 | `docker compose exec app …` → "service is not running" | the app is restarting because of a boot error: `docker compose logs app` |
 | The image build is very slow, or fails fetching packages | the repo ships `.npmrc` pointing at a Chinese mirror. It works worldwide, but if you would rather use the default registry, delete the `COPY … .npmrc` line in the `Dockerfile` |
 | Build killed, exit code 137 | out of memory — Vite needs roughly 1 GB to build |
