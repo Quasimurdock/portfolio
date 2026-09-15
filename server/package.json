@@ -9,11 +9,13 @@
     "start": "deno run --allow-all src/index.js",
     "seed": "deno run --allow-all src/seed.js",
     "reset": "deno run --allow-all src/seed.js --reset",
+    "bootstrap": "deno run --allow-all src/bootstrap.js",
     "cli": "deno run --allow-all src/cli.js",
     "dev:node": "node --watch src/index.js",
     "start:node": "node src/index.js",
     "seed:node": "node src/seed.js",
     "reset:node": "node src/seed.js --reset",
+    "bootstrap:node": "node src/bootstrap.js",
     "cli:node": "node src/cli.js"
   },
   "dependencies": {

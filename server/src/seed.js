@@ -5,11 +5,18 @@
  *   node src/seed.js            idempotent: safe to run any number of times
  *   node src/seed.js --reset    drop every table, recreate, then seed
  *
+ * Every insert below is an upsert keyed on the row's natural key (email, url,
+ * slug, section key …), so re-running it rewrites the demo rows instead of
+ * duplicating them. `bootstrap.js` imports `seedEverything` from here to seed a
+ * brand-new database from a deploy step.
+ *
  * The content is the demo material the legacy single-file site shipped in
  * legacy/index.html — NAV, SECTION_ROWS, FILM_ROWS, MONOGRAPH_ROWS, LIST_ROWS,
  * BIOGRAPHY, CONTACT and FEED_ROWS — ported through the same `photo()` /
  * `seriesImages()` helpers so the public site shows exactly that material.
  */
+import { pathToFileURL } from 'node:url'
+
 import { all, describeTarget, get, run, insertReturningId, initDb, resetDatabase, tx } from './db.js'
 import { hashPassword } from './auth.js'
 import { PERMISSIONS, ROLES } from './permissions.js'
@@ -541,7 +548,7 @@ async function resolveFeedTarget(path, caption) {
   return { linkKind: 'none', targetCollectionId: null, targetArticleId: null }
 }
 
-async function seedEverything() {
+export async function seedEverything() {
   await upsertPermissions() // roles link to these, so they must exist first
   await upsertRoles()
   const userIds = await upsertUsers()
@@ -830,4 +837,11 @@ async function main() {
   )
 }
 
-await main()
+// `import.meta.main` is Deno's "was this file run directly?"; the `process.argv`
+// comparison is the Node fallback. Same shape as `index.js`, so `npm run
+// seed:node` keeps working and `bootstrap.js` can import `seedEverything`
+// without this file seeding the database on import.
+const isMain =
+  import.meta.main ?? (Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href)
+
+if (isMain) await main()
