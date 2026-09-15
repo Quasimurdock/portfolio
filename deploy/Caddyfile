@@ -1,5 +1,5 @@
 # Caddy in front of the app: automatic HTTPS (Let's Encrypt), automatic HTTP→HTTPS
-# redirect, and gzip/zstd compression — none of which the Node process does itself.
+# redirect, and gzip/zstd compression — none of which the app process does itself.
 #
 # DOMAIN comes from the .env file that docker compose passes to this container.
 # It must already point at this server (an A record), and ports 80/443 must be

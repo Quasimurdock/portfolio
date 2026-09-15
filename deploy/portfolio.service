@@ -1,8 +1,16 @@
 # Bare-metal alternative to Docker: run the app as a systemd service behind Caddy.
 #
+# The API runs on Deno (>= 2.2). Node 20 will NOT work: the data layer uses
+# `node:sqlite`, which Node only gained in 22.5. Install Deno system-wide first:
+#
+#   curl -fsSL https://deno.land/install.sh | sudo DENO_INSTALL=/usr/local sh
+#
+# Then:
+#
 #   sudo useradd --system --create-home --home-dir /srv/portfolio portfolio
 #   sudo -u portfolio git clone <your repo> /srv/portfolio
-#   cd /srv/portfolio && npm ci && npm --workspace web run build && npm run seed
+#   cd /srv/portfolio && npm ci && npm --workspace web run build
+#   sudo -u portfolio /usr/local/bin/deno run --allow-all server/src/seed.js   # optional demo content
 #   sudo cp deploy/portfolio.service /etc/systemd/system/
 #   sudo systemctl enable --now portfolio
 #
@@ -21,12 +29,14 @@ User=portfolio
 Group=portfolio
 WorkingDirectory=/srv/portfolio
 EnvironmentFile=/srv/portfolio/.env
-ExecStart=/usr/bin/node server/src/index.js
+# Deno caches npm/JSR modules here; it would otherwise default to ~/.cache/deno
+Environment=DENO_DIR=/srv/portfolio/.deno-cache
+ExecStart=/usr/local/bin/deno run --allow-all server/src/index.js
 Restart=always
 RestartSec=3
 
-# the database lives beside the checkout, on a path that survives deploys
-ReadWritePaths=/srv/portfolio/data
+# the database and the Deno cache live beside the checkout, on paths that survive deploys
+ReadWritePaths=/srv/portfolio/data /srv/portfolio/.deno-cache
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

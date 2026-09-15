@@ -1,18 +1,29 @@
 #!/bin/sh
 # Seed on first boot, then hand over to the server.
 #
-# The database is a single SQLite file on a volume, so "is this a fresh install?"
-# is simply "does the file exist?". `seed.js` is idempotent anyway, but skipping
-# it on every restart keeps boot fast and never touches live content.
+# The two drivers answer "is this a fresh install?" differently:
+#
+#   sqlite   → the database is a single file on a volume, so the question is
+#              simply "does the file exist?". `seed.js` is idempotent anyway, but
+#              skipping it on every restart keeps boot fast and never touches
+#              live content.
+#   postgres → there is no file to test, and seeding on every boot would keep
+#              resurrecting the demo content, so seeding is left to an explicit
+#              run of `deno task seed` (or `--reset`) against the same
+#              DATABASE_URL.
 set -e
 
-DB="${DATABASE_FILE:-/data/app.db}"
-
-if [ ! -f "$DB" ]; then
-  echo "[entrypoint] no database at $DB — seeding a fresh one"
-  node server/src/seed.js
+if [ "${DB_DRIVER:-sqlite}" = "postgres" ]; then
+  echo "[entrypoint] DB_DRIVER=postgres — not seeding automatically; run 'deno task seed' if you want the demo content"
 else
-  echo "[entrypoint] using the existing database at $DB"
+  DB="${DATABASE_FILE:-/data/app.db}"
+
+  if [ ! -f "$DB" ]; then
+    echo "[entrypoint] no database at $DB — seeding a fresh one"
+    deno run --allow-all server/src/seed.js
+  else
+    echo "[entrypoint] using the existing database at $DB"
+  fi
 fi
 
-exec node server/src/index.js
+exec deno run --allow-all server/src/index.js

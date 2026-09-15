@@ -1,6 +1,6 @@
 # Deploying
 
-The app is one Node process that serves **both** the API and the built site on one port. That is deliberate: the
+The app is one Deno process that serves **both** the API and the built site on one port. That is deliberate: the
 router uses history mode (`createWebHistory`), so the SPA fallback and the API have to live on the same origin — and
 so does the session cookie (`SameSite=Lax`), which is what makes login work without any CORS or cookie-domain
 configuration.
@@ -73,18 +73,18 @@ The seed ships demo accounts whose password (`portfolio`) is in the README, so t
 server is create your own and disable theirs:
 
 ```bash
-docker compose exec app node server/src/cli.js users
-docker compose exec app node server/src/cli.js create --email you@example.com --name "You" --role owner
+docker compose exec app deno run --allow-all server/src/cli.js users
+docker compose exec app deno run --allow-all server/src/cli.js create --email you@example.com --name "You" --role owner
 # prints a generated password once — paste it into the sign-in form and change it
 for e in owner editor author viewer; do
-  docker compose exec app node server/src/cli.js status --email $e@portfolio.test --set disabled
+  docker compose exec app deno run --allow-all server/src/cli.js status --email $e@portfolio.test --set disabled
 done
 ```
 
 Sign in at `https://DOMAIN/admin`, then optionally clear the demo content (keeps users, roles and sections):
 
 ```bash
-docker compose exec app node server/src/cli.js wipe-content --yes
+docker compose exec app deno run --allow-all server/src/cli.js wipe-content --yes
 ```
 
 ### Verify the deployment
@@ -92,7 +92,7 @@ docker compose exec app node server/src/cli.js wipe-content --yes
 The repo ships the API test used during development. It creates and deletes its own article, so it is safe to run:
 
 ```bash
-docker compose exec app node scripts/smoke.mjs     # expects 36 passed, 0 failed
+docker compose exec app deno run --allow-net --allow-env scripts/smoke.mjs   # expects 36 passed, 0 failed
 ```
 
 Health check, if you prefer curl: `curl -s localhost:8787/api/health` → `{"ok":true,...}` (the app port is published
@@ -119,15 +119,18 @@ again (Caddy will fetch the certificate).
 
 ## Without Docker
 
-Works the same way on a bare VPS — Node 20 and Caddy, no containers:
+Works the same way on a bare VPS — **Deno and Caddy**, no containers:
 
 ```bash
+# Deno, not Node: the data layer uses node:sqlite, which Node only gained in 22.5
+curl -fsSL https://deno.land/install.sh | sudo DENO_INSTALL=/usr/local sh
+
 sudo useradd --system --create-home --home-dir /srv/portfolio portfolio
 sudo -u portfolio git clone https://github.com/Quasimurdock/portfolio.git /srv/portfolio
 cd /srv/portfolio
-sudo -u portfolio npm ci
+sudo -u portfolio npm ci                            # Node is still what builds the SPA
 sudo -u portfolio npm --workspace web run build     # writes web/dist — the site the API serves
-sudo -u portfolio npm run seed                      # skips if server/data/app.db already exists
+sudo -u portfolio /usr/local/bin/deno run --allow-all server/src/seed.js   # optional demo content
 cp deploy/.env.example .env                         # edit DOMAIN, COOKIE_SECRET, DATABASE_FILE=./data/app.db
 sudo cp deploy/portfolio.service /etc/systemd/system/
 sudo systemctl enable --now portfolio
@@ -137,7 +140,27 @@ sudo systemctl enable --now portfolio
 `deploy/Caddyfile` to `/etc/caddy/Caddyfile` and change `reverse_proxy app:8787` to
 `reverse_proxy 127.0.0.1:8787` — then `sudo systemctl reload caddy`.
 
-The CLI is the same, without the `docker compose exec app` prefix: `npm --workspace server run cli -- users`.
+The CLI is the same, without the `docker compose exec app` prefix: `deno run --allow-all server/src/cli.js users`.
+
+---
+
+## SQLite by default — switch to Postgres if you need it
+
+Everything above runs SQLite in a file on the host, which is the right default for a single VPS. Export
+`DB_DRIVER=postgres` — plus `DATABASE_URL`, or the standard `PGHOST` / `PGPORT` / `PGUSER` / `PGPASSWORD` /
+`PGDATABASE` variables — to run against a database server instead.
+
+You want Postgres if you need to run more than one replica, or if you are deploying to Deno Deploy: its instances
+have isolated, ephemeral disks, so a SQLite file cannot be the source of truth there (see
+[DENO-PORT.md](DENO-PORT.md) for the full reasoning).
+
+Seeding changes with it. The container entrypoint only auto-seeds SQLite, because "is this a fresh install?" is
+simply "does the file exist?" — there is no equivalent test for Postgres, and seeding on every boot would keep
+resurrecting the demo content. Seed explicitly instead, against the same `DATABASE_URL`:
+
+```bash
+DB_DRIVER=postgres DATABASE_URL='postgresql://…' deno run --allow-all server/src/seed.js --reset
+```
 
 ---
 
@@ -149,15 +172,16 @@ docker compose up -d --build      # rebuilds the image, restarts, leaves ./data 
 ```
 
 The database is a file on the host (`./data/app.db`), so a deploy never touches content. Migrations are not a thing
-yet: `server/src/schema.sql` is applied on every boot with `CREATE TABLE IF NOT EXISTS`, so additive changes land
-automatically, but a change to an existing column needs a migration you write yourself.
+yet: the schema for the configured driver — `server/src/schema.sql` for SQLite, `server/src/schema.postgres.sql` for
+Postgres — is applied on every boot with `CREATE TABLE IF NOT EXISTS`, so additive changes land automatically, but a
+change to an existing column needs a migration you write yourself.
 
 ## Backups
 
 Everything that matters is one file plus one folder:
 
 ```bash
-docker compose exec app node -e "require('better-sqlite3')" >/dev/null   # (sanity: the container is alive)
+docker compose exec app deno run --allow-net --allow-env scripts/healthcheck.mjs   # (sanity: the container is alive)
 tar czf portfolio-$(date +%F).tar.gz data/                               # the SQLite database
 ```
 
@@ -204,12 +228,15 @@ to the bucket.
 
 ## Known limits
 
-* **One instance only.** SQLite plus in-process sessions means you run exactly one app container; scale vertically.
+* **One instance only with SQLite.** A file database means one app container; scale vertically. Sessions live in the
+  database rather than in memory, so `DB_DRIVER=postgres` is what lets you run more than one replica.
 * **No password reset by email.** There is no mail server, so `cli passwd` is the reset path. Invitations created in
   the admin return a one-time token, and `cli passwd --email <invitee>` is what turns that invitation into a usable
   account.
 * **No rate limiting** on the API. Put Caddy (or a firewall) in front if the admin will be exposed to the open
   internet.
 * **Run as root inside the container.** It keeps the bind-mounted `./data` volume writable without ownership
-  juggling; switch to a named volume plus `USER node` if you prefer.
-* The image ships dev dependencies too (simpler, larger). `npm prune --omit=dev` in the runtime stage would shrink it.
+  juggling; switch to a named volume plus `USER deno` if you prefer.
+* The runtime image carries production dependencies only: the `Dockerfile` runs `npm prune --omit=dev` after the
+  front-end build. Node is still in the **build** stage, because Vite is the front-end toolchain — but the API itself
+  no longer runs on Node.

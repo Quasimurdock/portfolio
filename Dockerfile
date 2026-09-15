@@ -1,10 +1,12 @@
 # ---------- build the SPA ----------
-FROM node:20-slim AS build
+# Node is still needed here, but only to build the front end: Vite is the
+# toolchain. The API itself does not run on Node any more.
+FROM node:22-slim AS build
 WORKDIR /app
 
 # Manifests first: `npm ci` is then cached until a dependency actually changes.
-# The repo's .npmrc is copied too, so the install (and better-sqlite3's prebuilt
-# binary) comes from the same registry mirror.
+# The repo's .npmrc is copied too, so the install comes from the same registry
+# mirror (the public registry is unreachable from some networks).
 COPY package.json package-lock.json .npmrc ./
 COPY web/package.json ./web/
 COPY server/package.json ./server/
@@ -13,11 +15,18 @@ RUN npm ci --no-fund --no-audit
 COPY . .
 RUN npm --workspace web run build
 
-# ---------- run ----------
-FROM node:20-slim AS runtime
+# Drop the front-end toolchain before it reaches the runtime image. Deno only
+# needs the runtime dependencies (express, zod, pg) to resolve from node_modules.
+# `better-sqlite3` is gone, so there is no native addon and no prebuilt binary to
+# worry about any more.
+RUN npm prune --omit=dev
 
-# Debian (not Alpine) on purpose: better-sqlite3 ships prebuilt binaries for
-# glibc, so this image needs no compiler toolchain.
+# ---------- run ----------
+# Deno, not Node. The data layer uses `node:sqlite`, which Deno has built in
+# (>= 2.2) but Node only gained in 22.5 — and Node 20 was the old base image, so
+# it would fail at boot with ERR_UNKNOWN_BUILTIN_MODULE.
+FROM denoland/deno:2.6.7 AS runtime
+
 ENV NODE_ENV=production \
     PORT=8787 \
     DATABASE_FILE=/data/app.db \
@@ -39,7 +48,9 @@ RUN chmod +x /usr/local/bin/entrypoint && mkdir -p /data
 
 EXPOSE 8787
 
+# The probe is a file rather than an inline `deno eval` so it can be run and
+# verified outside a container build (`deno run --allow-net --allow-env scripts/healthcheck.mjs`).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD ["deno", "run", "--allow-net", "--allow-env", "scripts/healthcheck.mjs"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

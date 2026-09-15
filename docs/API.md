@@ -3,7 +3,8 @@
 Two deployables in one repo (npm workspaces):
 
 ```
-server/   Node 20 + Express + better-sqlite3 (SQLite) — JSON API, sessions, RBAC, OSS signing, WeChat login
+server/   Deno + Express — JSON API, sessions, RBAC, OSS signing, WeChat login
+          node:sqlite locally, Postgres on Deno Deploy (docs/DENO-PORT.md)
 web/      Vite + Vue 3 + TypeScript — one SPA with two route trees:
             /                 the public portfolio (ported from legacy/index.html)
             /admin            the studio back office (auth-guarded, permission-driven)

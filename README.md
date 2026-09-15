@@ -129,14 +129,14 @@ For local development two more things matter, both verified end to end:
 A WeChat account is ordinary content-wise: it is created with the configured default role, so an `author` signed in
 this way can create its own drafts but still gets `403` when it tries to publish.
 
-## Deployment
+## Running it in production
 
 ```bash
 npm run build            # web/dist — static, serve behind any web server
-NODE_ENV=production COOKIE_SECRET=… AUTH_DEV=0 npm --workspace server start
+NODE_ENV=production COOKIE_SECRET=… AUTH_DEV=0 deno run --allow-all server/src/index.js
 ```
 
-Terminate TLS in front of both, mount them on one origin (`/` → `dist`, `/api` → the Node process) so the
+Terminate TLS in front of both, mount them on one origin (`/` → `dist`, `/api` → the app process) so the
 `HttpOnly; SameSite=Lax` session cookie stays same-site. For direct-to-OSS uploads, allow the admin origin in the
 bucket's CORS rules.
 
@@ -154,9 +154,9 @@ docker compose up -d --build     # app + Caddy (automatic HTTPS)
 Then create your own account and retire the demo ones (`deploy/.env.example` explains every setting):
 
 ```bash
-docker compose exec app node server/src/cli.js create --email you@example.com --name "You" --role owner
-docker compose exec app node server/src/cli.js status --email owner@portfolio.test --set disabled
-docker compose exec app node scripts/smoke.mjs
+docker compose exec app deno run --allow-all server/src/cli.js create --email you@example.com --name "You" --role owner
+docker compose exec app deno run --allow-all server/src/cli.js status --email owner@portfolio.test --set disabled
+docker compose exec app deno run --allow-net --allow-env scripts/smoke.mjs
 ```
 
 Full walkthrough — bare-metal/systemd alternative, updates, backups, WeChat and OSS setup, and the known limits —
