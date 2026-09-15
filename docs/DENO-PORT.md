@@ -1,7 +1,7 @@
 # 适配 Deno 技术栈 — 已完成
 
 > 分支：`feat/nks-version`（基线 `main`）
-> 状态：**迁移完成；SQLite 与 Postgres 双引擎各自 36/36 冒烟测试通过**（Deno 2.6.7）
+> 状态：**迁移完成；SQLite 与 Postgres 双引擎各自 38/38 冒烟测试通过**（Deno 2.6.7）
 > 目标：让同一套代码既能本地/自托管跑 SQLite，也能部署到 **Deno Deploy**（Postgres）
 
 ---
@@ -190,32 +190,67 @@ Deno Deploy 官方文档：每个实例"彼此完全隔离，**不共享 CPU、�
 > 数据库必须允许任意 IP 连接（靠强密码 + TLS 兜）。介意就用它代开的 Prisma Postgres
 > （注意 "claim" 是**不可逆**操作）。
 
-**② 这是 monorepo，而 Deno Deploy 官方声明 "Mono-repos … are not yet supported"。** ⚠️
-API 在 `server/` 子目录里，自动识别会失败。但构建配置里可以手工指定
-**Dynamic Entrypoint**（"path relative to the working directory"）、
-Install / Build 命令与 Static Directory，所以走手工配置应该可行。
-如果 Deploy 坚持要求入口在仓库根，退路是在根目录放一个只有几行的入口文件
-转发到 `server/src/index.js`，或者把 API 拆成独立仓库。
+**② 这是 monorepo，必须把 App directory 设成「仓库根」。** ⚠️
+
+> 早先的 `getting_started` 页面写着 "Mono-repos … are not yet supported"，
+> 但**更新的** Builds 参考文档已经给出正式支持：
+> "**App directory**: The directory within the repository to use as the application root.
+> **Useful for monorepos.** Defaults to the repository root."
+> 而且 `deno deploy create` 的向导里也有这一步：
+> "App directory - Pick the directory within your project (**auto-detects workspace members**)",
+> 所以它在 UI 里会把 `web` / `server` 两个 workspace 成员列出来让你选。
+
+**不要选 `Web/`，也不要选 `Server/`，用仓库根。** 三个硬理由：
+
+1. **构建命令只存在于根。** `npm run build` 定义在根 `package.json`；
+   `server/package.json` **没有 `build` 脚本**。App directory 选 `Server` 的话，
+   默认 Build 命令 `npm run build` 会直接失败。
+2. **站点产物在 API 的隔壁。** `web/dist` 与 `server/` 平级；
+   `server/src/index.js` 用 `path.resolve(SERVER_ROOT, '../web/dist')` 找它
+   （`SERVER_ROOT` 由 `import.meta.url` 算出，与 cwd 无关）。
+   App directory = `Server` 时 `../web/dist` 落在应用根**之外**，产物里不会包含它 →
+   前端整站 404，只剩 API。
+3. **前端硬编码同源 `/api`。** `web/src/api/client.ts` 里 `const BASE = '/api'`
+   （`env.d.ts` 里的 `VITE_API_TARGET` 只是 Vite dev server 的反代目标，不是运行时
+   API base 的覆盖项）。只有「API + 站点同进程同源」这一种部署，
+   `SameSite=Lax` 的会话 cookie 才成立。选 `Web` 就是纯静态站 + 没有 API。
+
+UI 里 App directory 的默认值就是仓库根，**留空即可**；若向导强制你从
+`web` / `server` 里挑一个，挑任意一个先把 app 建出来，然后到
+App Settings → App Config → Edit 把 App directory 改回空/`.`，并把
+Entrypoint 设为 `server/src/index.js`。
 
 **③ 没有 shell。** `server/src/cli.js` 在 Deploy 上跑不了；`seed` 也一样。
 
-### 6.2 建议的构建配置
+### 6.2 控制台里怎么填
 
 | 配置项 | 值 |
 |---|---|
-| Runtime | `Dynamic`（不是 Static） |
+| **App directory** | **留空 = 仓库根**（不要选 `web` / `server`，理由见 §6.1 ②） |
+| Framework preset | `No Preset`（没有 vue-express 这种预设；别让它猜成 Vite 静态站） |
 | Install command | `npm install` |
-| Build command | `npm run build`（把 `web/dist` 建出来） |
-| Dynamic Entrypoint | `server/src/index.js` |
-| Static Directory | 留空 —— Express 自己托管 `web/dist`，这样站点与 API 同源，`SameSite=Lax` 的会话 cookie 才成立 |
-| Pre-Deploy Command | 可选，例如 `deno task migrate`（结构变更交给迁移，而不是每次冷启动跑 DDL） |
+| Build command | `npm run build`（根脚本 → `web/dist`） |
+| Runtime configuration | **`Dynamic`**（不是 Static） |
+| ├ Entrypoint | `server/src/index.js` |
+| ├ Arguments | 留空 |
+| └ Runtime working directory | 留空（`config.js` 用 `import.meta.url` 定位 `server/`，不依赖 cwd） |
+| Static Directory | 留空 —— 那是 Static 模式才用的。站点由 Express 自己托管 `web/dist`，这样站点与 API 同源，`SameSite=Lax` 的会话 cookie 才成立 |
+| Pre-Deploy Command | `deno run --allow-all server/src/bootstrap.js` —— 幂等，每次部署都安全：空库才灌 seed，然后按环境变量保证有一个能登录的账号（§6.3） |
+| Build timeout | 默认 5 分钟；`npm install`（走镜像）+ `vite build` 有可能不够，超时再调 |
 
-环境变量：
+> `.npmrc` 把 registry 钉在 `registry.npmmirror.com`（见文件里的注释：这台机器连不上
+> npmjs.org）。镜像是公网 CDN，Deploy 的构建机也能拉，只是比 npmjs 慢。
+> 如果 Install 阶段卡住/超时，把 Install command 临时改成
+> `npm install --registry=https://registry.npmjs.org/`（构建机在海外，不受本机网络限制）。
+
+环境变量（Production 与 Development 两个 context 都设）：
 
 ```
+NODE_ENV=production
 DB_DRIVER=postgres
-# DATABASE_URL 由 Deno Deploy 挂库时自动注入（连同 PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE）
-COOKIE_SECRET=<openssl rand -base64 48>
+# DATABASE_URL 不要手填 —— 在 Databases 里挂库后由平台自动注入
+# （连同 PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE）
+COOKIE_SECRET=<openssl rand -base64 48>      # 标记为 secret
 AUTH_DEV=0
 HTTPS=1
 
@@ -228,21 +263,106 @@ OSS_PROVIDER=mock
 # 正式环境改成 aliyun 并填 key，同时把 admin 源站加进 bucket 的 CORS 规则
 ```
 
-> 端口：`config.js` 读 `PORT`，Deno Deploy 注入的值会直接生效。
-> 但官方文档**没有明确写**端口是通过 `PORT` 传递的 —— 首次部署请确认这一点。
+> 端口：`config.js` 读 `PORT`（`int('PORT', 8787)`，8787 只是本地默认值）。
+> 官方文档没有一句话直说「Deploy 会注入 `PORT`」，但两件事基本锁死了它：
+> `Deno.serve()` 的端口默认值就是「`PORT` 环境变量，否则 8000」；
+> 而 Next.js standalone 的 server 只认 `process.env.PORT`，官方却把 Next.js 列为一级支持 ——
+> 所以平台必然注入 `PORT`。本项目的 `config.js` 已经读它，**不需要改代码**。
+> 首次部署盯一下 build 的 **Warm up** 阶段日志确认。
 
-### 6.3 首次建账号 / 灌数据
+> TLS：挂外库时 Deploy 注入的 `DATABASE_URL` 通常带 `?sslmode=require`，
+> `pg-connection-string` 会据此把 `ssl` 打开（`sslmode=require` → `ssl: true`），
+> 所以**不用设 `PGSSL`**。我们的驱动只在 `PGSSL` 有值时才显式覆盖 `ssl`，
+> 两者不会打架。
 
-Deploy 上没有 shell，但可以在**本地**对着远端库跑：
+### 6.3 首次建账号 —— 交给 Pre-Deploy Command（推荐）
 
-```bash
-cd server
-export DB_DRIVER=postgres
-export DATABASE_URL='postgresql://…'      # 从 Deploy 控制台复制
+Deploy 的运行时里没有 shell，所以「第一次怎么进去」只能由构建阶段解决。
+把它交给 **Pre-Deploy Command**（App Settings → App Config）：
 
-deno task seed                            # 灌演示数据（可选）
+```
+deno run --allow-all server/src/bootstrap.js
+```
+
+它每次部署都会跑一遍 —— 每个 timeline 各跑一次，而且拿到的是**那个 timeline
+自己的库**。三步都幂等：
+
+1. 应用 schema（幂等 DDL）
+2. **只有库还是空的时候**才灌 seed。`sections` 表没有写接口，不灌的话
+   `/api/public/sections` 是空的（前端导航），新建文章/合集会被
+   `requireSection()` 打回 `400 Unknown section`
+3. 按环境变量保证一个能登录的账号
+
+```
+DEMO_OWNER_EMAIL=demo@portfolio.test    # 想用自己邮箱就改
+DEMO_OWNER_PASSWORD=<至少 8 位>          # 必填，标记为 secret
+DEMO_OWNER_NAME=                        # 可选，默认取邮箱 @ 前面那段
+DEMO_OWNER_ROLE=owner                   # 可选
+DEMO_OWNER_RESET_PASSWORD=1             # 可选：把已存在账号的密码改回来
+```
+
+然后到 `https://<你的-app>.deno.net/admin` 用这个账号登录。
+
+四个刻意的设计：
+
+* **没有默认密码。** `DEMO_OWNER_PASSWORD` 不填就跳过建号，只打一行警告
+  （不让构建失败）—— 和 `WECHAT_MOCK` 一样，不给「能悄悄带到生产的默认值」。
+* **不打印密码。** Deploy 的构建日志是留存可查的，把密码写进去等于泄露；
+  密码本来就在你手上。
+* **已存在的账号不动。** 除非 `DEMO_OWNER_RESET_PASSWORD=1`，
+  你在后台改过的名字/密码不会被下次部署覆盖回去。
+* **空库才灌 seed。** 否则每次部署都会把演示行 upsert 回原样，抹掉你的编辑。
+
+> 实测：连跑三次，第一次灌 seed + 打警告，第二次建号，第三次两个步骤都跳过；
+> 用 bootstrap 建的账号登录 → `200`，`/api/admin/overview`、`/roles`、`/users` 全部
+> `200`，错误密码 `401`。
+
+#### 6.3.1 不想用 Pre-Deploy：本机 CLI
+
+等价的手工做法 —— 在**本地**对着生产库跑：
+
+```powershell
+cd D:\proj\nks\server
+$env:DB_DRIVER    = 'postgres'
+$env:DATABASE_URL = 'postgresql://…'    # 控制台 → Databases → 复制 production 那条
+
+deno run --allow-all src/cli.js users   # 先看库里已经有什么
 deno run --allow-all src/cli.js create --email you@example.com --name "You" --role owner
-deno run --allow-all src/cli.js status --email owner@portfolio.test --set disabled
+deno run --allow-all src/cli.js passwd --email you@example.com   # 改密码
+```
+
+⚠️ 一定要 **production** 那条连接串 —— branch / preview 各自是**另外的库**，
+在那边建号等于建到一个没人访问的库上。
+
+#### 6.3.2 演示账号，以及 seed 到底幂不幂等
+
+`deno task seed` 会建 4 个账号，密码都是 README 里写的 `portfolio`：
+`owner@` / `editor@` / `author@` / `viewer@portfolio.test`。
+只想快速体验 RBAC 矩阵，直接拿它们登录最省事；公开部署前记得关掉：
+
+```powershell
+foreach ($e in 'owner','editor','author','viewer') {
+  deno run --allow-all src/cli.js status --email "$e@portfolio.test" --set disabled
+}
+```
+
+**`seed.js` 是幂等的**：每条 insert 都按自然键 upsert（email / url / slug / section key），
+实测连跑两次行数完全一致（`5 roles, 21 permissions, 65 role_permissions,
+12 sections, 4 users, 55 collections, 894 images, 22 articles, 12 feed items, 2 pages`）。
+所以重复跑不会灌成两套。不幂等的是 `deno task reset`（`--reset` 会 **drop 所有表**），
+别对着生产库用。
+
+> 权限**不依赖** `roles` / `role_permissions` 表：`permissionsOf()` 在
+> `req.user.permissions` 缺失时回退到 `server/src/permissions.js` 里那张静态矩阵，
+> `owner` 更是恒等于全集。表里的行只喂管理端的角色矩阵页面
+> （`GET /api/admin/roles`），所以哪怕没灌 seed，新建的 owner 也能操作全部功能。
+
+#### 6.3.3 清场（可选）
+
+想留下账号、角色、分区，只清掉演示内容：
+
+```powershell
+deno run --allow-all src/cli.js wipe-content --yes
 ```
 
 ### 6.4 自托管（不改变数据库）
@@ -268,7 +388,7 @@ $ deno run --allow-all src/index.js
   portfolio api listening on http://localhost:8787
   db=sqlite → …\server\data\app.db
 $ node scripts/smoke.mjs
-  OK  36 passed, 0 failed                            # server stderr empty
+  OK  38 passed, 0 failed                            # server stderr empty
 
 # ---- Postgres 15（独立临时实例，127.0.0.1:5433） ----
 $ DB_DRIVER=postgres DATABASE_URL='postgresql://…@127.0.0.1:5433/portfolio' \
@@ -280,7 +400,7 @@ $ DB_DRIVER=postgres DATABASE_URL='postgresql://…@127.0.0.1:5433/portfolio' \
 $ DB_DRIVER=postgres … deno run --allow-all src/index.js
   db=postgres → 127.0.0.1:5433/portfolio
 $ node scripts/smoke.mjs
-  OK  36 passed, 0 failed
+  OK  38 passed, 0 failed
 
 # 关键一步：确认写入真的落在 Postgres（而不是"碰巧通过"）
 $ psql -p 5433 -d portfolio …
@@ -290,12 +410,13 @@ $ psql -p 5433 -d portfolio …
 ```
 
 **为什么非要去查库确认**：两个引擎的种子数据本来就一模一样，
-所以单看 `36 passed` 是分辨不出 API 到底连了哪个库的。
+所以单看 `38 passed` 是分辨不出 API 到底连了哪个库的。
 查库看到冒烟测试新建的用户、会话、审计日志和图片 URL 才算真的证明了。
 
 两个引擎的 seed 计数完全相同（5 / 21 / 65 / 12 / 4 / 55 / 894 / 22 / 12 / 2）。
 
-36 项覆盖：各角色权限差异（21/16/5/3 个权限）、作者间归属隔离（403）、
+38 项覆盖：各角色权限差异（21/16/5/3 个权限）、作者间归属隔离（403）、
+概览面板的作用域（owner 看到全站 22 篇、author 只看到自己的 11 篇，见 §7.2 第 8 条）、
 `draft → review → published → archived` 流转与 `published_at` 打点、公开接口隐藏内部字段、
 OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写入、微信 mock 登录
 （含创建用户 + 开会话，即 `insertReturningId` / `RETURNING id` 路径）、伪造 state 被拒。
@@ -320,6 +441,7 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 | 5 | `routes/uploads.js` 漏改 | 最初扫描正则只覆盖 `all\|get\|run\|tx\|lastId`，漏了 `record(` → 浮动 promise，其拒绝绕过错误中间件 | 补 `await record(...)` |
 | 6 | `Buffer` 没有 import | Node 里是全局，**Deno 里不是** → 7 处直接 `ReferenceError` | `auth.js` / `oss.js` 各加 `import { Buffer } from 'node:buffer'` |
 | 7 | 启动日志报错数据库 | 连的是 Postgres，却打印 SQLite 文件路径（无条件输出 `config.databaseFile`） | 新增 `describeTarget()`，boot 日志与 CLI 共用；顺带修掉 CLI 里同样的硬编码 |
+| 8 | **概览面板不认 `*.read_all`**（`main` 上就有，**不是本次迁移引入的**） | `overview.js` 调 `ownershipClause()` 时没传 `scope`，而该函数「没传就是 `mine`」→ 全新 owner 打开后台看到**全 0**，可列表页却是 `canReadAll ? 'all' : 'mine'`，两边对不上 | 改成 `scope: req.query.scope ?? 'all'`（无权限者会被 `ownershipClause` 降级回 `mine`），并在 smoke 里补 2 条断言锁住行为 |
 
 > 第 7 条值得单独强调：冒烟测试全绿，但只要看一眼启动日志就会以为自己在用 SQLite。
 > 这种"能跑但在说谎"的问题，只有真的把进程启起来盯着日志看才会发现。
@@ -328,9 +450,9 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 
 | 项 | 原因 |
 |---|---|
-| **Deno Deploy 实际部署** | 需要账号、挂库，并确认 monorepo 入口与 `PORT` 约定（官方文档没写明端口怎么传） |
+| **Deno Deploy 实际部署** | 已在真实环境跑通（App directory = 仓库根、Entrypoint = `server/src/index.js`、Pre-Deploy = `bootstrap.js`）。仍需你确认的是**从本机连远端 Postgres 的 TLS 路径** —— 我没有连接串，只验证到 `pg-connection-string` 会认 `sslmode=require` |
 | `? → $n` 转换器的边角分支 | 字符串字面量 / 注释 / `$tag$` 跳过逻辑都已实现，但本项目 SQL 没走到这些分支；JSONB 的 `?` / `?\|` 同理 |
-| 增量迁移 | boot 时的幂等 DDL 已验证；**迁移脚本**（Deno Deploy 的 Pre-Deploy Command）还没搭 |
+| 增量迁移 | 仍然没有迁移脚本。Pre-Deploy Command 现在跑的是 `bootstrap.js`（空库才灌 seed + 保证账号）；**schema 变更还是靠 boot 时的幂等 DDL** |
 | 外挂 Postgres 的 TLS | 本地实例走 trust 认证，`PGSSL=require` 与自签证书上传路径未验证 |
 
 > Postgres 验证用的是**独立临时实例**：拿已安装的 PG15 二进制 `initdb` 到临时目录、
@@ -352,7 +474,7 @@ deno task reset                 # seed.js --reset：清空重建 + 灌数据
 deno task start                 # 应打印 db=postgres → 127.0.0.1:5433/portfolio
 
 # 另一个终端
-node scripts/smoke.mjs          # 期望 36 passed, 0 failed
+node scripts/smoke.mjs          # 期望 38 passed, 0 failed
 
 # 收尾
 pg_ctl -D /tmp/nks-pg stop && rm -rf /tmp/nks-pg /tmp/nks-pg.log

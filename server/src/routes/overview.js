@@ -36,7 +36,17 @@ router.get(
     const counts = []
 
     for (const spec of ENTITIES) {
-      const scope = ownershipClause(req.user, { readAll: spec.readAll, column: spec.column })
+      // Default to the studio-wide counts, exactly like the list screens do
+      // (`defaultScope = canReadAll ? 'all' : 'mine'`). `ownershipClause`
+      // silently downgrades `scope=all` back to `mine` for anyone without the
+      // matching `*.read_all`, so an author still only ever sees its own
+      // numbers — the default above is what makes this route agree with its own
+      // doc comment instead of always reporting the caller's rows.
+      const scope = ownershipClause(req.user, {
+        readAll: spec.readAll,
+        column: spec.column,
+        scope: req.query.scope ?? 'all',
+      })
       const clause = scope.sql ? scope.sql.replace(/^\s*AND\s*/, '') : '1 = 1'
       const args = scope.params
 

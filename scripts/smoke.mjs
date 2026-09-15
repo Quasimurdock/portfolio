@@ -220,6 +220,22 @@ async function main() {
   ok('pages list', pages.status === 200 && Array.isArray(pages.body), `${Array.isArray(pages.body) ? pages.body.length : 0} pages`)
   const overview = await call(sessions.owner.jar, 'GET', '/api/admin/overview')
   ok('the publishing overview answers', overview.status === 200 && overview.body?.counts, `${overview.body?.counts?.length ?? 0} count rows`)
+
+  // The dashboard has to count what the list screens show. `ownershipClause`
+  // downgrades `scope=all` back to `mine` for anyone without the matching
+  // `*.read_all`, so "default to studio-wide" is safe: a privileged role gets
+  // the studio's numbers, an author still gets only its own.
+  const totalOf = (body, entity) =>
+    (body?.counts ?? []).find((row) => row.entity === entity && row.status === 'total')?.n
+  const studioArticles = (await call(sessions.owner.jar, 'GET', '/api/admin/articles?scope=all&pageSize=1')).body?.total
+  ok('the overview counts the studio for the owner', totalOf(overview.body, 'article') === studioArticles,
+    `overview ${totalOf(overview.body, 'article')} = list ${studioArticles}`)
+
+  const authorOverview = await call(sessions.author.jar, 'GET', '/api/admin/overview')
+  ok("the overview narrows to the author's own rows",
+    totalOf(authorOverview.body, 'article') > 0 && totalOf(authorOverview.body, 'article') < studioArticles,
+    `${totalOf(authorOverview.body, 'article')} of ${studioArticles}`)
+
   const audit = await call(sessions.owner.jar, 'GET', '/api/admin/audit?limit=10')
   ok('the audit trail recorded our work', audit.status === 200 && Array.isArray(audit.body) && audit.body.length > 0, `${audit.body?.length ?? 0} entries`)
 
