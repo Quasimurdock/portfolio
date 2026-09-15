@@ -67,7 +67,27 @@ function bool(key, fallback) {
   return /^(1|true|yes|on)$/i.test(value)
 }
 
-const port = int('PORT', 8787)
+/**
+ * True on Deno Deploy, which sets `DENO_DEPLOY=true` for builds, for the
+ * pre-deploy command and for the runtime alike.
+ *
+ * The sanity checks key off this because both of this project's default
+ * fallbacks are actively wrong on that platform: every instance has its own
+ * isolated ephemeral disk, so a SQLite file cannot hold the data — and `pg`
+ * falling back to `localhost:5432` can never resolve, because there is no local
+ * database in the sandbox. The port default differs for the same reason.
+ */
+export const onDenoDeploy = /^(1|true|yes|on)$/i.test(process.env.DENO_DEPLOY ?? '')
+
+/**
+ * The port the API binds.
+ *
+ * `PORT` wins whenever it is set. Deno Deploy does **not** set it: the platform
+ * probes the port `Deno.serve()` would have used — 8000 — so keeping our local
+ * 8787 there means nothing ever answers the warm-up request. The app logs
+ * "listening", looks perfectly healthy, and the build still times out.
+ */
+const port = int('PORT', onDenoDeploy ? 8000 : 8787)
 const databaseFile = str('DATABASE_FILE', './data/app.db')
 const staticDir = str('STATIC_DIR', '../web/dist')
 const wechatAppId = str('WECHAT_APP_ID', '')
@@ -143,15 +163,3 @@ export const DATA_DIR = path.dirname(config.databaseFile)
 
 /** True when the secret is still the shipped development placeholder. */
 export const usingDefaultCookieSecret = config.cookieSecret === 'change-me'
-
-/**
- * True on Deno Deploy, which sets `DENO_DEPLOY=true` for builds, for the
- * pre-deploy command and for the runtime alike.
- *
- * The sanity checks key off this because both of this project's default
- * fallbacks are actively wrong on that platform: every instance has its own
- * isolated ephemeral disk, so a SQLite file cannot hold the data — and `pg`
- * falling back to `localhost:5432` can never resolve, because there is no local
- * database in the sandbox.
- */
-export const onDenoDeploy = /^(1|true|yes|on)$/i.test(process.env.DENO_DEPLOY ?? '')

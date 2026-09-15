@@ -279,12 +279,15 @@ OSS_PROVIDER=mock
 > **直接让构建失败**；运行时（`index.js`）也会打一条显眼的警告兜底。
 > 拿不准就给 Production / Development / Build 三个 context 都设上。
 
-> 端口：`config.js` 读 `PORT`（`int('PORT', 8787)`，8787 只是本地默认值）。
-> 官方文档没有一句话直说「Deploy 会注入 `PORT`」，但两件事基本锁死了它：
-> `Deno.serve()` 的端口默认值就是「`PORT` 环境变量，否则 8000」；
-> 而 Next.js standalone 的 server 只认 `process.env.PORT`，官方却把 Next.js 列为一级支持 ——
-> 所以平台必然注入 `PORT`。本项目的 `config.js` 已经读它，**不需要改代码**。
-> 首次部署盯一下 build 的 **Warm up** 阶段日志确认。
+> **端口：Deploy 上必须监听 8000。** 平台**不会**注入 `PORT` —— 实测的启动日志打的是
+> `listening on http://localhost:8787`（我们的本地默认值），于是 Warm up 探了 **4m44s**
+> 也没等到 HTTP 服务，而应用自己的日志看上去完全健康。
+> 平台探的是 `Deno.serve()` 会用的那个端口，也就是 **8000**：Fresh、Astro / SvelteKit 的
+> Deno adapter、Hono 这些被官方列为一级支持的路径全都默认 8000。
+>
+> 所以 `config.js` 现在是 `int('PORT', onDenoDeploy ? 8000 : 8787)`：`PORT` 有值就听它的
+> （平台哪天开始注入也自动生效），在 Deploy 上退回 8000，本地与自托管仍是 8787 ——
+> Caddyfile、systemd unit、healthcheck 都不用动。
 
 > TLS：挂外库时 Deploy 注入的 `DATABASE_URL` 通常带 `?sslmode=require`，
 > `pg-connection-string` 会据此把 `ssl` 打开（`sslmode=require` → `ssl: true`），
@@ -458,6 +461,7 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 | 6 | `Buffer` 没有 import | Node 里是全局，**Deno 里不是** → 7 处直接 `ReferenceError` | `auth.js` / `oss.js` 各加 `import { Buffer } from 'node:buffer'` |
 | 7 | 启动日志报错数据库 | 连的是 Postgres，却打印 SQLite 文件路径（无条件输出 `config.databaseFile`） | 新增 `describeTarget()`，boot 日志与 CLI 共用；顺带修掉 CLI 里同样的硬编码 |
 | 8 | **概览面板不认 `*.read_all`**（`main` 上就有，**不是本次迁移引入的**） | `overview.js` 调 `ownershipClause()` 时没传 `scope`，而该函数「没传就是 `mine`」→ 全新 owner 打开后台看到**全 0**，可列表页却是 `canReadAll ? 'all' : 'mine'`，两边对不上 | 改成 `scope: req.query.scope ?? 'all'`（无权限者会被 `ownershipClause` 降级回 `mine`），并在 smoke 里补 2 条断言锁住行为 |
+| 9 | **Deploy 上端口回退成 8787**（只有真实部署才暴露） | 以为平台会注入 `PORT`，实际没有：应用打印 `listening on …:8787`，Warm up **4m44s** 超时，而应用自己的日志一切正常 | `config.js` 改成 `int('PORT', onDenoDeploy ? 8000 : 8787)` —— 平台探的是 `Deno.serve()` 的默认端口 8000 |
 
 > 第 7 条值得单独强调：冒烟测试全绿，但只要看一眼启动日志就会以为自己在用 SQLite。
 > 这种"能跑但在说谎"的问题，只有真的把进程启起来盯着日志看才会发现。
