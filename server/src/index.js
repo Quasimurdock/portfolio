@@ -156,6 +156,19 @@ app.use((err, req, res, _next) => {
 /* ------------------------------------------------------------------ start -- */
 
 export async function start() {
+  // Loud on purpose, because the failure it prevents is silent: on Deno Deploy a
+  // SQLite fallback means every instance writes to its own throwaway disk, so
+  // the site boots empty and every login is a 401 with nothing in the logs to
+  // explain it. `bootstrap.js` refuses to seed in this state; this is the
+  // runtime half of the same check, for when the two disagree.
+  if (process.env.DENO_DEPLOY && config.dbDriver !== 'postgres') {
+    console.warn(
+      '!! DB_DRIVER is not "postgres" but DENO_DEPLOY is set: this instance is writing to an ' +
+        'ephemeral disk, so data will vanish and instances will disagree. Attach a database and ' +
+        'set DB_DRIVER=postgres (Production/Development contexts).',
+    )
+  }
+
   await initDb()
   const pruned = await pruneExpiredSessions()
   const server = app.listen(config.port, () => {

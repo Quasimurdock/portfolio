@@ -31,7 +31,7 @@
  * The password is never logged: Deno Deploy keeps build logs. Use one of the
  * seeded demo accounts (password "portfolio") if you would rather not set it.
  */
-import { describeTarget, get, initDb, insertReturningId, run, tx } from './db.js'
+import { describeTarget, driverName, get, initDb, insertReturningId, run, tx } from './db.js'
 import { hashPassword } from './auth.js'
 import { record } from './audit.js'
 import { ROLE_KEYS } from './permissions.js'
@@ -46,6 +46,27 @@ function env(name) {
 
 function truthy(value) {
   return value !== undefined && /^(1|true|yes|on)$/i.test(value)
+}
+
+/**
+ * Refuse to seed a disk that is about to be thrown away.
+ *
+ * Deno Deploy sets `DENO_DEPLOY=true` for builds and at runtime, and gives every
+ * instance its own isolated ephemeral disk. Falling back to the default SQLite
+ * driver there is the worst possible failure: the build **succeeds**, the log
+ * looks healthy, and the seeded rows land in a file that is discarded — so the
+ * app serves an empty database and every sign-in is a 401 with no hint why.
+ * That is worth a failed build.
+ */
+function assertUsableTarget() {
+  if (!truthy(process.env.DENO_DEPLOY) || driverName === 'postgres') return
+  throw new Error(
+    `DB_DRIVER is "${driverName}" but this is running on Deno Deploy, where every instance has its ` +
+      'own ephemeral disk. Seeding SQLite here would write to a file that is discarded, leaving the ' +
+      'database the app actually reads empty (and every login a 401). Attach a database to the app ' +
+      'and set DB_DRIVER=postgres — in the Production and Development contexts, and in Build too if ' +
+      'the pre-deploy command does not inherit them.',
+  )
 }
 
 /** Seed only an untouched database, so a redeploy never rewrites edited rows. */
@@ -109,6 +130,7 @@ async function ensureAccount() {
   console.log(`bootstrap: created ${email} (${role}) — sign in at /admin`)
 }
 
+assertUsableTarget()
 await initDb()
 console.log(`bootstrap: ${describeTarget()}`)
 await seedIfEmpty()

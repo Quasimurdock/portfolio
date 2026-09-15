@@ -263,6 +263,14 @@ OSS_PROVIDER=mock
 # 正式环境改成 aliyun 并填 key，同时把 admin 源站加进 bucket 的 CORS 规则
 ```
 
+> **context 一定要选对。** 这些变量要设在 **Production**（预览环境再设 Development）。
+> 如果 pre-deploy 命令读不到它们，`bootstrap.js` 就会退回默认的 `sqlite` —— 那会把数据
+> 写进构建容器里一个随即被丢弃的文件：构建**成功**、日志看着正常，但线上库仍然是空的，
+> 表现就是「站点没内容 + 登录 401」，而且日志里没有任何线索。
+> 所以现在 `bootstrap.js` 一旦发现 `DENO_DEPLOY=true` 却没有 `DB_DRIVER=postgres` 就
+> **直接让构建失败**；运行时（`index.js`）也会打一条显眼的警告兜底。
+> 拿不准就给 Production / Development / Build 三个 context 都设上。
+
 > 端口：`config.js` 读 `PORT`（`int('PORT', 8787)`，8787 只是本地默认值）。
 > 官方文档没有一句话直说「Deploy 会注入 `PORT`」，但两件事基本锁死了它：
 > `Deno.serve()` 的端口默认值就是「`PORT` 环境变量，否则 8000」；
