@@ -11,14 +11,20 @@
  *
  * So on Deploy `Deno.serve()` owns the listener and this module translates each
  * fetch `Request` into the `(req, res)` pair express expects, and the response
- * back into a `Response`. Node's `IncomingMessage`/`ServerResponse` provide the
- * express-facing objects (so `req.protocol`, `req.ip`, `res.setHeader`,
- * `res.send`, `res.sendFile` and the streaming used by the static middleware
- * all behave normally); only the two ends that would normally touch a TCP
- * socket are replaced.
+ * back into a `Response`. A real `ServerResponse` provides the express-facing
+ * response (so `req.protocol`, `req.ip`, `res.setHeader`, `res.send`,
+ * `res.sendFile` and the streaming used by the static middleware all behave
+ * normally); only the two ends that would normally touch a TCP socket are
+ * replaced.
+ *
+ * The request is a plain `Readable` over the already-buffered body rather than
+ * a node `IncomingMessage`: on Deno 2.6 a hand-fed `IncomingMessage` loses
+ * everything it buffered once the stream ends (a 600 KB upload arrives as its
+ * first 323 bytes), which makes `req.headers['content-length']` disagree with
+ * what the body parsers read.
  */
-import { IncomingMessage, ServerResponse } from 'node:http'
-import { Writable } from 'node:stream'
+import { ServerResponse } from 'node:http'
+import { Readable, Writable } from 'node:stream'
 
 // Headers that describe this hop only; they must not be copied onto the fetch
 // Response (fetch rejects some of them outright).
@@ -36,7 +42,7 @@ const HOP_BY_HOP = new Set([
 const BODYLESS_STATUS = new Set([204, 304])
 
 /**
- * Stands in for the socket an `IncomingMessage` expects. It is never written
+ * Stands in for the socket the request and response expect. It is never written
  * to — the response side is captured directly — but express reads the address
  * off it (`req.ip`, `req.protocol`) and node attaches listeners to it.
  */
@@ -87,10 +93,11 @@ class InertSocket extends Writable {
   }
 }
 
-function toNodeRequest(request) {
+function toNodeRequest(request, parts) {
   const url = new URL(request.url)
   const socket = new InertSocket()
-  const req = new IncomingMessage(socket)
+
+  const req = Readable.from(parts, { objectMode: false })
 
   req.method = request.method
   req.url = `${url.pathname}${url.search}`
@@ -104,7 +111,7 @@ function toNodeRequest(request) {
     headers[key] = key in headers ? `${headers[key]}, ${value}` : value
   }
   req.headers = headers
-  req.complete = false
+  req.complete = true
   req.socket = socket
   // `connection` is a getter for `socket` on some runtimes and a plain property
   // on others; express reads it for `req.protocol`.
@@ -117,20 +124,15 @@ function toNodeRequest(request) {
   return { req, socket }
 }
 
-async function feedBody(request, req) {
-  if (!request.body) {
-    req.complete = true
-    req.push(null)
-    return
-  }
-  try {
-    for await (const chunk of request.body) req.push(Buffer.from(chunk))
-    req.complete = true
-    req.push(null)
-  } catch (error) {
-    req.complete = true
-    req.destroy(error)
-  }
+/**
+ * Reads the whole request body up front. Everything downstream expects a node
+ * request stream whose `content-length` matches what the parsers read, and the
+ * bodies this app accepts are small (1 MB JSON, 25 MB database uploads), so
+ * buffering is simpler and safer than pumping the fetch stream chunk by chunk.
+ */
+async function readBody(request) {
+  if (!request.body) return []
+  return [Buffer.from(await request.arrayBuffer())]
 }
 
 function toBuffer(chunk, encoding) {
@@ -258,8 +260,18 @@ function createResponse(req) {
  * `Deno.serve()` accepts. One `Request` in, one `Response` out.
  */
 export function createFetchHandler(nodeHandler) {
-  return function fetchHandler(request) {
-    const { req } = toNodeRequest(request)
+  return async function fetchHandler(request) {
+    let parts
+    try {
+      parts = await readBody(request)
+    } catch {
+      return Response.json(
+        { error: { code: 'bad_request', message: 'The request body could not be read' } },
+        { status: 400 },
+      )
+    }
+
+    const { req } = toNodeRequest(request, parts)
     const { res, response } = createResponse(req)
 
     try {
@@ -267,16 +279,6 @@ export function createFetchHandler(nodeHandler) {
     } catch (error) {
       return Promise.reject(error)
     }
-
-    // Started only after the handler ran so the listeners express installs
-    // (the JSON body parser in particular) are attached before any data.
-    feedBody(request, req).catch((error) => {
-      try {
-        req.destroy(error)
-      } catch {
-        /* the request is already gone */
-      }
-    })
 
     return response
   }
