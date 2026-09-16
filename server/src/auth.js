@@ -19,6 +19,17 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 /* ------------------------------------------------------------- passwords -- */
 
+/**
+ * A random password to hand to whoever the account is for.
+ *
+ * 12 base64url characters ≈ 72 bits: far beyond guessing, short enough to read
+ * off a screen and type. Printed once by whoever creates the account and never
+ * stored in plain text.
+ */
+export function generatePassword() {
+  return crypto.randomBytes(9).toString('base64url')
+}
+
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16)
   const derived = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN)

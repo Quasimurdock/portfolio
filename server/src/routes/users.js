@@ -1,14 +1,16 @@
 /**
- * People (docs/API.md §3.2): list, invite, update.
+ * People (docs/API.md §3.2): list, create, update.
  *
- * `role.assign` is a separate permission from `user.update`, so an `editor`
- * who may read people cannot silently promote themselves.
+ * Accounts are created outright — with a password, active from the first
+ * request — rather than by invitation. `role.assign` is still a separate
+ * permission from `user.update`, so an `admin` who may add people cannot
+ * promote themselves or mint an owner.
  */
 import { Router } from 'express'
-import crypto from 'node:crypto'
 import { z } from 'zod'
 import { all, get, insertReturningId, run } from '../db.js'
 import { record } from '../audit.js'
+import { generatePassword, hashPassword } from '../auth.js'
 import { asyncHandler, badRequest, conflict, forbidden, notFound, parseBody } from '../errors.js'
 import {
   assertPermission,
@@ -18,7 +20,7 @@ import {
   requirePermission,
   statusParam,
 } from '../middleware.js'
-import { ROLE_KEYS, roleExists } from '../permissions.js'
+import { ROLE_KEYS, roleExists, roleRank } from '../permissions.js'
 import { nowIso, paged, toUser } from '../serialize.js'
 import { parseId } from './_shared.js'
 
@@ -32,6 +34,8 @@ const createSchema = z.object({
   email: z.string().trim().email().max(200),
   name: z.string().trim().min(1).max(200),
   role: z.string().trim().min(1).max(40).refine(roleExists, { message: `role must be one of ${ROLE_KEYS.join(', ')}` }),
+  /** Omit it and the server generates one; either way it is never stored in the clear. */
+  password: z.string().min(8).max(200).optional(),
 })
 
 const patchSchema = z.object({
@@ -75,7 +79,7 @@ router.get(
   }),
 )
 
-/* ---------------------------------------------------------------- invite -- */
+/* ---------------------------------------------------------------- create -- */
 
 router.post(
   '/',
@@ -86,18 +90,26 @@ router.post(
     if (existing) throw conflict('That email is already in use', { email: data.email })
     if (!roleExists(data.role)) throw badRequest(`Unknown role: ${data.role}`, { role: data.role })
 
+    // Handing out a role above your own is privilege escalation: an admin may
+    // create editors and authors, but only an owner may create another owner.
+    // `role.assign` is the permission that draws that line.
+    if (roleRank(data.role) > roleRank(req.user.role_key ?? req.user.role)) {
+      assertPermission(req.user, 'role.assign')
+    }
+
+    const generated = data.password ? null : generatePassword()
     const now = nowIso()
-    const inviteToken = crypto.randomBytes(24).toString('base64url')
     const id = await insertReturningId(
       `INSERT INTO users
          (email, name, avatar_url, password_hash, role_key, status, invited_by, invite_token, created_at, updated_at)
-       VALUES (?, ?, NULL, NULL, ?, 'invited', ?, ?, ?, ?)`,
-      [data.email, data.name, data.role, req.user.id, inviteToken, now, now],
+       VALUES (?, ?, NULL, ?, ?, 'active', ?, NULL, ?, ?)`,
+      [data.email, data.name, hashPassword(data.password ?? generated), data.role, req.user.id, now, now],
     )
 
-    await record(req.user.id, 'invite', ENTITY, id, { email: data.email, role: data.role })
+    await record(req.user.id, 'create', ENTITY, id, { email: data.email, role: data.role })
     const row = await get('SELECT * FROM users WHERE id = ?', [id])
-    res.status(201).json({ ...toUser(row), inviteToken })
+    // A generated password comes back exactly once, here, and is never stored.
+    res.status(201).json({ ...toUser(row), ...(generated ? { password: generated } : {}) })
   }),
 )
 

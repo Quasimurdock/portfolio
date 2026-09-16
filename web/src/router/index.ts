@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { SITE_NAME } from '@/brand'
 import { useAuthStore } from '@/stores/auth'
 
 /**
@@ -35,6 +36,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'users', name: 'admin-users', component: () => import('@/admin/views/UserListView.vue'), meta: { title: 'People' } },
       { path: 'roles', name: 'admin-roles', component: () => import('@/admin/views/RoleMatrixView.vue'), meta: { title: 'Roles' } },
       { path: 'audit', name: 'admin-audit', component: () => import('@/admin/views/AuditView.vue'), meta: { title: 'Activity' } },
+      { path: 'data', name: 'admin-data', component: () => import('@/admin/views/DataImportView.vue'), meta: { title: 'Data' } },
     ],
   },
 
@@ -78,5 +80,5 @@ router.beforeEach(async (to) => {
 router.afterEach((to) => {
   // public views refine this once their content has loaded (see FeedView/SectionView)
   const title = to.meta.title as string | undefined
-  document.title = title ? `${title} – Portfolio` : 'Portfolio'
+  document.title = title ? `${title} – ${SITE_NAME}` : SITE_NAME
 })

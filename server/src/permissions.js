@@ -30,7 +30,7 @@ export const PERMISSIONS = [
   { key: 'media.upload', groupKey: 'media', description: 'Sign a direct-to-OSS upload' },
 
   { key: 'user.read', groupKey: 'user', description: 'List people, roles and activity' },
-  { key: 'user.invite', groupKey: 'user', description: 'Invite new people' },
+  { key: 'user.invite', groupKey: 'user', description: 'Create new accounts' },
   { key: 'user.update', groupKey: 'user', description: 'Update people' },
   { key: 'user.disable', groupKey: 'user', description: 'Disable or re-enable people' },
 

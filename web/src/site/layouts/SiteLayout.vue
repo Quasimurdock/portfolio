@@ -12,6 +12,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { publicApi } from '@/api/endpoints'
+import { SITE_NAME } from '@/brand'
 import { useQuery } from '@/composables/useQuery'
 import { setPageTitle, usePageTitle } from '@/site/lib/page-title'
 import type { Section } from '@/types/api'
@@ -22,9 +23,6 @@ const { data: nav } = useQuery<Section[]>(() => 'nav', () => publicApi.nav(), []
 
 const navOpen = ref(false)
 const scrolled = ref(false)
-const footerOpen = ref(false)
-const subscribed = ref(false)
-const email = ref('')
 const year = new Date().getFullYear()
 
 const isFeed = computed(() => route.name === 'feed')
@@ -63,7 +61,7 @@ const displayTitle = computed(() => pageTitle.value ?? routeTitle.value)
 watch(
   displayTitle,
   (title) => {
-    document.title = title ? `${title} \u2013 Portfolio` : 'Portfolio'
+    document.title = title ? `${title} \u2013 ${SITE_NAME}` : SITE_NAME
   },
   { immediate: true },
 )
@@ -117,15 +115,6 @@ onBeforeUnmount(() => {
   footerObserver?.disconnect()
   footerObserver = null
 })
-
-/* ---------- footer ---------- */
-
-function subscribe() {
-  if (!email.value) return
-  subscribed.value = true
-  email.value = ''
-  footerOpen.value = false
-}
 </script>
 
 <template>
@@ -141,7 +130,7 @@ function subscribe() {
           <div class="wrapper clear">
             <div class="nav-bar-wrapper clear">
               <div class="site-title">
-                <RouterLink to="/" @click="closeNav">Portfolio</RouterLink>
+                <RouterLink to="/" @click="closeNav">{{ SITE_NAME }}</RouterLink>
               </div>
               <button
                 class="nav-trigger"
@@ -192,28 +181,11 @@ function subscribe() {
         <div class="container">
           <div class="site-footer__wrap">
             <div class="footer-newsletter">
-              <form class="newsletter-form" novalidate @submit.prevent="subscribe">
-                <p class="footer-paragraph">
-                  <a
-                    href="#"
-                    class="js-footer-toggle"
-                    :aria-expanded="footerOpen ? 'true' : 'false'"
-                    @click.prevent="footerOpen = !footerOpen"
-                  >Subscribe</a>
-                </p>
-                <fieldset v-if="footerOpen">
-                  <input
-                    v-model="email"
-                    type="email"
-                    class="input--text"
-                    name="subscriber_email"
-                    placeholder="Enter your email address"
-                    aria-label="Email address"
-                  >
-                  <input type="submit" class="input--button-blank newsletter-submit" value="Submit">
-                </fieldset>
-                <p v-if="subscribed" class="footer-paragraph">Thank you — please confirm by email.</p>
-              </form>
+              <!-- The old newsletter form had no backend; the feed is the one
+                   subscription a static site can actually honour. -->
+              <p class="footer-paragraph">
+                <a href="/feed.xml" target="_blank" rel="noopener">RSS</a>
+              </p>
               <div class="footer-social">
                 <p class="footer-paragraph">
                   <a href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a>
@@ -222,7 +194,7 @@ function subscribe() {
               </div>
             </div>
             <div class="footer-copyright">
-              <p class="footer-paragraph">&copy; {{ year }} Portfolio &middot; <RouterLink to="/admin">Studio</RouterLink></p>
+              <p class="footer-paragraph">&copy; {{ year }} {{ SITE_NAME }} &middot; <RouterLink to="/admin">Studio</RouterLink></p>
             </div>
           </div>
         </div>

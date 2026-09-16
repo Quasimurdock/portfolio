@@ -30,6 +30,8 @@ import overviewRoutes from './routes/overview.js'
 import auditRoutes from './routes/audit.js'
 import uploadsRoutes from './routes/uploads.js'
 import publicRoutes from './routes/public.js'
+import rssRoutes from './routes/rss.js'
+import importRoutes from './routes/import.js'
 
 export const app = express()
 
@@ -76,6 +78,28 @@ app.use('/api/admin/pages', pagesRoutes)
 app.use('/api/admin/users', usersRoutes)
 app.use('/api/admin/roles', rolesRoutes)
 app.use('/api/admin/audit', auditRoutes)
+/**
+ * The database import takes a raw SQLite file, so it parses its own body: the
+ * global JSON/urlencoded parsers above skip `application/octet-stream` (they
+ * only claim their own content types), and `express.raw` claims it here for
+ * this route alone. The 25 MB ceiling matches the UI's own hint; an oversized
+ * upload is turned into a 413 by the error handler below.
+ */
+app.use(
+  '/api/admin/import',
+  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
+  importRoutes,
+)
+
+/* ------------------------------------------------------------- the feed --- */
+
+/**
+ * `/feed.xml` lives outside `/api` because that is where readers look for it,
+ * and it must be mounted *before* the SPA fallback below: a browser navigating
+ * to the feed sends `Accept: text/html`, which the fallback would answer with
+ * the app shell instead of the XML.
+ */
+app.use('/feed.xml', rssRoutes)
 
 /* ------------------------------------------------------------- the site --- */
 

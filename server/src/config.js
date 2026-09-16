@@ -93,6 +93,7 @@ const staticDir = str('STATIC_DIR', '../web/dist')
 const wechatAppId = str('WECHAT_APP_ID', '')
 const dbDriver = str('DB_DRIVER', 'sqlite').toLowerCase() === 'postgres' ? 'postgres' : 'sqlite'
 const databaseUrl = str('DATABASE_URL', '')
+const authDev = bool('AUTH_DEV', false)
 
 export const config = {
   env: str('NODE_ENV', 'development'),
@@ -133,7 +134,21 @@ export const config = {
   /** adds `Secure` to every cookie we set */
   https: bool('HTTPS', false),
   /** enables POST /api/auth/dev-login — never on in production */
-  authDev: bool('AUTH_DEV', false),
+  authDev,
+  /**
+   * The product name, used by the RSS feed and handed to the front end through
+   * `GET /api/public/config`. The web app has its own copy (`VITE_SITE_NAME`)
+   * because the SPA is built and served separately.
+   */
+  siteName: str('SITE_NAME', 'Ob5erver'),
+  /**
+   * Whether the sign-in page may offer the quick demo-account sign-in.
+   *
+   * Defaults to `authDev`, so turning AUTH_DEV on locally reveals the panel and
+   * production (where AUTH_DEV is unset) hides it. `DEMO_LOGIN=0` hides the
+   * panel while keeping dev-login itself working, for demos on a public host.
+   */
+  demoLogin: bool('DEMO_LOGIN', authDev),
 
   oss: {
     provider: str('OSS_PROVIDER', 'mock'),

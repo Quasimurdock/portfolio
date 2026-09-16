@@ -181,6 +181,50 @@ export interface UploadTicket {
   maxBytes: number
 }
 
+/* --------------------------------------------------------------- deployment */
+
+export interface PublicConfig {
+  siteName: string
+  /** whether the sign-in page may offer the seeded demo accounts */
+  demoLogin: boolean
+}
+
+/* ------------------------------------------------------- database transfer */
+
+export interface ImportTable {
+  name: string
+  label: string
+  /** checked by default in the import form */
+  default: boolean
+}
+
+export interface ImportTableResult {
+  name: string
+  label: string
+  /** false when the uploaded file has no such table */
+  present: boolean
+  /** rows found in the uploaded file */
+  read: number
+  /** rows already in this database, after the run */
+  existing: number
+  /** rows the run tried to write (merge: not already identical) */
+  attempted?: number
+  /** null on a dry run */
+  inserted: number | null
+  /** null on a dry run; rows a taken id/email/slug kept out */
+  skipped: number | null
+}
+
+export interface ImportSummary {
+  mode: 'merge' | 'replace'
+  dryRun: boolean
+  target: string
+  driver: string
+  tables: ImportTableResult[]
+  warnings: string[]
+  durationMs: number
+}
+
 /* ------------------------------------------------------------------ queries */
 
 export interface ListQuery {

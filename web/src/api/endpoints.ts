@@ -9,11 +9,13 @@ import type {
   Collection,
   FeedItem,
   ImageAsset,
+  ImportTable,
   ListQuery,
   Overview,
   Page,
   Paged,
   Permission,
+  PublicConfig,
   Role,
   Section,
   SectionPayload,
@@ -37,6 +39,8 @@ export const authApi = {
 }
 
 export const publicApi = {
+  /** the few deployment facts the SPA needs before it can render */
+  config: () => api.get<PublicConfig>('/public/config'),
   nav: () => api.get<Section[]>('/public/nav'),
   feed: () => api.get<FeedItem[]>('/public/feed'),
   section: (key: string) => api.get<SectionPayload>(`/public/sections/${key}`),
@@ -82,13 +86,23 @@ export const adminApi = {
   users: {
     list: (query?: { q?: string; role?: string; status?: string }) =>
       api.get<Paged<User>>('/admin/users', query as Record<string, string | undefined>),
-    create: (body: { email: string; name: string; role: string }) =>
-      api.post<User & { inviteToken: string }>('/admin/users', body),
+    /** returns the generated password once, when none was supplied */
+    create: (body: { email: string; name: string; role: string; password?: string }) =>
+      api.post<User & { password?: string }>('/admin/users', body),
     update: (id: number, body: { name?: string; role?: string; status?: string }) =>
       api.patch<User>(`/admin/users/${id}`, body),
   },
   roles: () => api.get<{ roles: Role[]; permissions: Permission[] }>('/admin/roles'),
   audit: (limit = 50) => api.get<AuditEntry[]>('/admin/audit', { limit }),
+}
+
+/**
+ * Moving an old install into this one. Only the catalogue lives here — the
+ * upload itself streams a file, so it goes through `admin/lib/import.ts`
+ * instead of `request()`, which always encodes its body as JSON.
+ */
+export const importApi = {
+  tables: () => api.get<{ tables: ImportTable[]; maxBytes: number }>('/admin/import/tables'),
 }
 
 export const uploadsApi = {

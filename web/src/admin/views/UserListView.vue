@@ -3,9 +3,10 @@
  * People.
  *
  * Roles come from the database (`adminApi.roles()`), so a role the client adds
- * later appears here without a code change. Inviting returns a one-time
- * `inviteToken` — in production that goes out by email; here it is shown so it
- * can be copied into a message by hand.
+ * later appears here without a code change. An owner or an admin creates an
+ * account outright and hands over the password: either one they type, or one
+ * the server generates and shows exactly once. (The permission behind this is
+ * still keyed `user.invite` in the database.)
  *
  * `GET /api/admin/users` is documented with `q`/`role`/`status` only (no page
  * parameters), so this screen filters but does not page.
@@ -34,7 +35,7 @@ const auth = useAuthStore()
 const { success, info, error: toastError } = useToast()
 
 const canRead = computed(() => auth.can('user.read'))
-const canInvite = computed(() => auth.can('user.invite'))
+const canCreate = computed(() => auth.can('user.invite'))
 const canUpdate = computed(() => auth.can('user.update'))
 const canAssignRole = computed(() => auth.can('role.assign'))
 const canDisable = computed(() => auth.can('user.disable'))
@@ -165,58 +166,68 @@ async function changeStatus(user: User, status: string): Promise<void> {
   }
 }
 
-/* ------------------------------------------------------------------- invite */
+/* ------------------------------------------------------------------- create */
 
-const inviteOpen = ref(false)
-const inviteForm = reactive({ email: '', name: '', role: 'author' })
-const inviteErrors = reactive({ email: '', name: '' })
-const inviting = ref(false)
-const inviteError = ref('')
+const createOpen = ref(false)
+const createForm = reactive({ email: '', name: '', role: 'author', password: '' })
+const createErrors = reactive({ email: '', name: '', password: '' })
+const creating = ref(false)
+const createError = ref('')
 
-const issuedOpen = ref(false)
-const issuedEmail = ref('')
-const issuedToken = ref('')
+const resultOpen = ref(false)
+const resultEmail = ref('')
+const resultPassword = ref('')
 
-function openInvite(): void {
-  inviteForm.email = ''
-  inviteForm.name = ''
-  inviteForm.role = roleKeys.value.includes('author') ? 'author' : (roleKeys.value[0] ?? 'author')
-  inviteErrors.email = ''
-  inviteErrors.name = ''
-  inviteError.value = ''
-  inviteOpen.value = true
+function openCreate(): void {
+  createForm.email = ''
+  createForm.name = ''
+  createForm.password = ''
+  createForm.role = roleKeys.value.includes('author') ? 'author' : (roleKeys.value[0] ?? 'author')
+  createErrors.email = ''
+  createErrors.name = ''
+  createErrors.password = ''
+  createError.value = ''
+  createOpen.value = true
 }
 
-async function submitInvite(): Promise<void> {
-  if (inviting.value) return
-  const email = inviteForm.email.trim()
-  inviteErrors.email = !email ? 'An email address is required.' : /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? '' : 'That does not look like an email address.'
-  inviteErrors.name = inviteForm.name.trim() ? '' : 'A name is required — it is what the audit log shows.'
-  if (inviteErrors.email || inviteErrors.name) return
+async function submitCreate(): Promise<void> {
+  if (creating.value) return
+  const email = createForm.email.trim()
+  const password = createForm.password
+  createErrors.email = !email ? 'An email address is required.' : /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? '' : 'That does not look like an email address.'
+  createErrors.name = createForm.name.trim() ? '' : 'A name is required — it is what the audit log shows.'
+  createErrors.password =
+    !password || password.length >= 8 ? '' : 'Use at least 8 characters — or leave it empty and the server generates one.'
+  if (createErrors.email || createErrors.name || createErrors.password) return
 
-  inviting.value = true
-  inviteError.value = ''
+  creating.value = true
+  createError.value = ''
   try {
-    const created = await adminApi.users.create({ email, name: inviteForm.name.trim(), role: inviteForm.role })
-    issuedEmail.value = created.email ?? email
-    issuedToken.value = created.inviteToken
-    inviteOpen.value = false
-    issuedOpen.value = true
+    const created = await adminApi.users.create({
+      email,
+      name: createForm.name.trim(),
+      role: createForm.role,
+      ...(password ? { password } : {}),
+    })
+    resultEmail.value = created.email ?? email
+    resultPassword.value = created.password ?? ''
+    createOpen.value = false
+    resultOpen.value = true
     await loadUsers()
   } catch (err) {
-    inviteError.value = errorMessage(err)
+    createError.value = errorMessage(err)
     toastError(errorMessage(err))
   } finally {
-    inviting.value = false
+    creating.value = false
   }
 }
 
-async function copyToken(): Promise<void> {
+async function copyPassword(): Promise<void> {
   try {
-    await navigator.clipboard.writeText(issuedToken.value)
-    success('Invite token copied to the clipboard.')
+    await navigator.clipboard.writeText(resultPassword.value)
+    success('Password copied to the clipboard.')
   } catch {
-    info('Copying failed — select the token and copy it by hand.')
+    info('Copying failed — select the password and copy it by hand.')
   }
 }
 </script>
@@ -231,7 +242,7 @@ async function copyToken(): Promise<void> {
         </p>
       </div>
       <div class="admin-page__actions">
-        <button v-if="canInvite" type="button" class="admin-btn admin-btn--sm admin-btn--primary" @click="openInvite">Invite</button>
+        <button v-if="canCreate" type="button" class="admin-btn admin-btn--sm admin-btn--primary" @click="openCreate">New account</button>
       </div>
     </header>
 
@@ -323,46 +334,55 @@ async function copyToken(): Promise<void> {
       </p>
     </template>
 
-    <ModalDialog :open="inviteOpen" title="Invite someone" :busy="inviting" @close="inviteOpen = false">
+    <ModalDialog :open="createOpen" title="New account" :busy="creating" @close="createOpen = false">
       <p class="admin-modal__desc">
-        The account is created straight away with the chosen role; the invite token is what the person would receive by
-        email in production.
+        The account works straight away. Set a password here, or leave the field empty and the server generates one for
+        you to pass on.
       </p>
-      <p v-if="inviteError" class="admin-formerror" role="alert">{{ inviteError }}</p>
+      <p v-if="createError" class="admin-formerror" role="alert">{{ createError }}</p>
 
-      <FormField label="Email" for-id="invite-email" required :error="inviteErrors.email">
-        <input id="invite-email" v-model="inviteForm.email" class="admin-input" type="email" placeholder="name@studio.test" />
+      <FormField label="Email" for-id="create-email" required :error="createErrors.email">
+        <input id="create-email" v-model="createForm.email" class="admin-input" type="email" placeholder="name@studio.test" />
       </FormField>
-      <FormField label="Name" for-id="invite-name" required :error="inviteErrors.name" hint="Shown in the audit log.">
-        <input id="invite-name" v-model="inviteForm.name" class="admin-input" type="text" />
+      <FormField label="Name" for-id="create-name" required :error="createErrors.name" hint="Shown in the audit log.">
+        <input id="create-name" v-model="createForm.name" class="admin-input" type="text" />
       </FormField>
-      <FormField label="Role" for-id="invite-role" hint="Every permission this person gets comes from this role.">
-        <select id="invite-role" v-model="inviteForm.role" class="admin-select">
+      <FormField label="Role" for-id="create-role" hint="Every permission this person gets comes from this role.">
+        <select id="create-role" v-model="createForm.role" class="admin-select">
           <option v-for="key in roleKeys" :key="key" :value="key">{{ key }}</option>
         </select>
       </FormField>
+      <FormField
+        label="Password"
+        for-id="create-password"
+        :error="createErrors.password"
+        hint="Leave empty to generate one. At least 8 characters."
+      >
+        <input id="create-password" v-model="createForm.password" class="admin-input" type="text" autocomplete="new-password" placeholder="leave empty to generate" />
+      </FormField>
 
       <template #footer>
-        <button type="button" class="admin-btn" :disabled="inviting" @click="inviteOpen = false">Cancel</button>
-        <button type="button" class="admin-btn admin-btn--primary" :disabled="inviting" @click="submitInvite">
-          {{ inviting ? 'Inviting…' : 'Create invitation' }}
+        <button type="button" class="admin-btn" :disabled="creating" @click="createOpen = false">Cancel</button>
+        <button type="button" class="admin-btn admin-btn--primary" :disabled="creating" @click="submitCreate">
+          {{ creating ? 'Creating…' : 'Create account' }}
         </button>
       </template>
     </ModalDialog>
 
-    <ModalDialog :open="issuedOpen" title="Invitation created" @close="issuedOpen = false">
-      <p class="admin-modal__desc">
-        Send this one-time token to <strong>{{ issuedEmail }}</strong>. It is shown once — the server does not keep a
-        readable copy.
+    <ModalDialog :open="resultOpen" title="Account created" @close="resultOpen = false">
+      <p v-if="resultPassword" class="admin-modal__desc">
+        Hand this password to <strong>{{ resultEmail }}</strong>. It is shown once — the database only keeps the hash.
       </p>
-      <p class="admin-token">{{ issuedToken }}</p>
-      <p class="admin-field__hint">
-        In production this would be emailed by the server; the back office shows it because no mail transport is
-        configured in development.
+      <p v-else class="admin-modal__desc">
+        <strong>{{ resultEmail }}</strong> can sign in with the password you set.
+      </p>
+      <p v-if="resultPassword" class="admin-token">{{ resultPassword }}</p>
+      <p v-if="resultPassword" class="admin-field__hint">
+        Pass it on over a channel you trust; it cannot be read back out of the database.
       </p>
       <template #footer>
-        <button type="button" class="admin-btn admin-btn--primary" @click="copyToken">Copy token</button>
-        <button type="button" class="admin-btn" @click="issuedOpen = false">Done</button>
+        <button v-if="resultPassword" type="button" class="admin-btn admin-btn--primary" @click="copyPassword">Copy password</button>
+        <button type="button" class="admin-btn" @click="resultOpen = false">Done</button>
       </template>
     </ModalDialog>
   </div>

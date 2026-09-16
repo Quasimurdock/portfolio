@@ -5,6 +5,7 @@
  * every payload goes through the `{ forPublic: true }` branch of serialize.js.
  */
 import { Router } from 'express'
+import { config } from '../config.js'
 import { all, get } from '../db.js'
 import { asyncHandler, notFound } from '../errors.js'
 import { toArticle, toCollection, toPage, toSection } from '../serialize.js'
@@ -12,6 +13,18 @@ import { toArticle, toCollection, toPage, toSection } from '../serialize.js'
 const router = Router()
 
 const PUBLISHED = "status = 'published'"
+
+/* ----------------------------------------------------------------- config -- */
+
+/**
+ * The handful of deployment facts the SPA needs before it can render.
+ *
+ * Deliberately tiny and read-only: a name, and whether this server offers the
+ * demo sign-in. Everything else the front end needs is baked in at build time.
+ */
+router.get('/config', (_req, res) => {
+  res.json({ siteName: config.siteName, demoLogin: config.demoLogin })
+})
 
 /* ------------------------------------------------------------------- nav -- */
 

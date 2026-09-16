@@ -4,15 +4,21 @@
  *
  * Three doors, in the order a real studio would use them: WeChat (the client's
  * audience is in China), email + password, and — because the seeded database
- * has four accounts and no mail server — a dev shortcut. The dev endpoint is
- * only mounted when the server runs with `AUTH_DEV=1`, so its failure is
- * surfaced as a toast instead of being treated as a bug.
+ * has four accounts and no mail server — a shortcut for the demo accounts.
+ *
+ * The copy here is public: it is the first thing an unauthenticated visitor
+ * sees, so it says nothing about how the back office is built. The demo panel
+ * only renders when the server reports `demoLogin` (see `GET /api/public/config`,
+ * which defaults to `AUTH_DEV`), so a production host never advertises the
+ * seeded accounts.
  */
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errorMessage } from '@/api/client'
+import { publicApi } from '@/api/endpoints'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { SITE_NAME } from '@/brand'
 import FormField from '@/admin/components/FormField.vue'
 
 interface DevAccount {
@@ -38,6 +44,17 @@ const errors = reactive({ email: '', password: '' })
 const submitting = ref(false)
 const wechatLoading = ref(false)
 const devPending = ref('')
+
+/** Asked of the server rather than the build: a single bundle ships to both. */
+const demoLogin = ref(false)
+
+onMounted(async () => {
+  try {
+    demoLogin.value = (await publicApi.config()).demoLogin
+  } catch {
+    demoLogin.value = false
+  }
+})
 
 /** Only ever bounce back into the back office — never off-site. */
 const redirect = computed(() => {
@@ -98,18 +115,12 @@ async function devLogin(email: string): Promise<void> {
 <template>
   <div class="admin-login">
     <section class="admin-login__intro">
-      <p class="admin-login__eyebrow">Portfolio</p>
+      <p class="admin-login__eyebrow">{{ SITE_NAME }}</p>
       <h1 class="admin-login__title">Studio</h1>
       <p class="admin-login__lead">
-        The back office: collections, essays, the home slideshow and the pages behind the work.
-        Everything publishable moves draft → review → published → archived, and every change is
-        recorded against the account that made it.
+        The studio back office. Write, arrange and publish the work — collections, essays, the
+        slideshow and the pages behind it.
       </p>
-      <ul class="admin-login__facts">
-        <li>Content is owned — without a read-all permission you only ever see your own rows.</li>
-        <li>Images live on OSS; the server signs uploads and never stores a byte.</li>
-        <li>Roles map to permission rows in the database, not to branches in code.</li>
-      </ul>
       <a class="admin-login__back" href="/">← Back to the site</a>
     </section>
 
@@ -152,11 +163,10 @@ async function devLogin(email: string): Promise<void> {
         </button>
       </form>
 
-      <div class="admin-login__dev">
-        <h3 class="admin-login__dev-title">Local development</h3>
+      <div v-if="demoLogin" class="admin-login__dev">
+        <h3 class="admin-login__dev-title">Demo accounts</h3>
         <p class="admin-login__dev-note">
-          The seeded accounts, signed in without a password. This shortcut only works while the
-          server runs with <code>AUTH_DEV=1</code>; the password for all four is
+          Try the back office without a password. All four share the password
           <code>portfolio</code>.
         </p>
         <ul class="admin-login__accounts">

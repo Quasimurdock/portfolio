@@ -9,6 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { errorMessage } from '@/api/client'
+import { SITE_NAME } from '@/brand'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { initials } from '@/admin/lib/format'
@@ -32,6 +33,7 @@ const NAV: NavEntry[] = [
   { to: '/admin/users', label: 'People', tag: 'PE', perm: 'user.read' },
   { to: '/admin/roles', label: 'Roles', tag: 'RO', perm: 'user.read' },
   { to: '/admin/audit', label: 'Activity', tag: 'AC', perm: 'user.read' },
+  { to: '/admin/data', label: 'Data', tag: 'DA', perm: 'settings.manage' },
 ]
 
 const auth = useAuthStore()
@@ -85,8 +87,8 @@ async function signOut(): Promise<void> {
 
     <aside class="admin-nav">
       <RouterLink class="admin-brand" to="/admin">
-        <span class="admin-brand__mark" aria-hidden="true">P</span>
-        <span class="admin-brand__text">Portfolio<em>Studio</em></span>
+        <span class="admin-brand__mark" aria-hidden="true">O</span>
+        <span class="admin-brand__text">{{ SITE_NAME }}<em>Studio</em></span>
       </RouterLink>
 
       <nav class="admin-nav__body" aria-label="Back office sections">

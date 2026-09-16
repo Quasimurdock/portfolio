@@ -24,10 +24,8 @@
  * on the server, against the same database the API uses; when the SQLite driver
  * is configured, pass DATABASE_FILE if it points somewhere non-default.
  */
-import crypto from 'node:crypto'
-
 import { all, describeTarget, get, initDb, run } from './db.js'
-import { hashPassword } from './auth.js'
+import { generatePassword, hashPassword } from './auth.js'
 import { record } from './audit.js'
 import { ROLE_KEYS } from './permissions.js'
 
@@ -41,11 +39,6 @@ function flag(name, fallback = null) {
   if (i === -1) return fallback
   const next = argv[i + 1]
   return next && !next.startsWith('--') ? next : true
-}
-
-function generatePassword() {
-  // 12 base64url characters ≈ 72 bits: fine for a password you will change or store
-  return crypto.randomBytes(9).toString('base64url')
 }
 
 function nowIso() {
