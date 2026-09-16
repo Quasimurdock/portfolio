@@ -12,6 +12,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { config, onDenoDeploy } from './config.js'
+import { createFetchHandler } from './deno-serve.js'
 import { describeTarget, initDb } from './db.js'
 import { parseCookies, pruneExpiredSessions } from './auth.js'
 import { attachUser } from './middleware.js'
@@ -171,7 +172,8 @@ export async function start() {
 
   await initDb()
   const pruned = await pruneExpiredSessions()
-  const server = app.listen(config.port, () => {
+
+  const announce = () => {
     console.log(`portfolio api listening on http://localhost:${config.port}`)
     console.log(
       `  db=${describeTarget()} oss=${config.oss.provider} wechat=${config.wechat.mode}${config.wechat.mock ? ' (mock)' : ''} authDev=${config.authDev ? 1 : 0}`,
@@ -182,8 +184,18 @@ export async function start() {
         : '  no built site found — the API only; run `npm run dev:web` for the front end',
     )
     if (pruned) console.log(`  pruned ${pruned} expired session(s)`)
-  })
-  return server
+  }
+
+  // On Deno Deploy the only listener the platform routes to — and the only one
+  // its build warm-up waits for — is the one `Deno.serve()` registers, bound to
+  // the address the platform injects. A bare `app.listen()` opens a normal TCP
+  // port that is never probed, so the process logs a healthy banner while the
+  // build still times out. Everywhere else the express server listens itself.
+  if (onDenoDeploy) {
+    return Deno.serve({ port: config.port, onListen: announce }, createFetchHandler(app))
+  }
+
+  return app.listen(config.port, announce)
 }
 
 // `import.meta.main` is Deno's (and Node 24+'s) "was this file run directly?";

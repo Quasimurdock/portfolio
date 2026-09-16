@@ -279,15 +279,23 @@ OSS_PROVIDER=mock
 > **直接让构建失败**；运行时（`index.js`）也会打一条显眼的警告兜底。
 > 拿不准就给 Production / Development / Build 三个 context 都设上。
 
-> **端口：Deploy 上必须监听 8000。** 平台**不会**注入 `PORT` —— 实测的启动日志打的是
-> `listening on http://localhost:8787`（我们的本地默认值），于是 Warm up 探了 **4m44s**
-> 也没等到 HTTP 服务，而应用自己的日志看上去完全健康。
-> 平台探的是 `Deno.serve()` 会用的那个端口，也就是 **8000**：Fresh、Astro / SvelteKit 的
-> Deno adapter、Hono 这些被官方列为一级支持的路径全都默认 8000。
+> **监听方式：Deploy 上必须由 `Deno.serve()` 监听（端口是其中的一小半）。** 两条都是
+> 实测踩出来的，症状一样：应用日志一切健康，Warm up 探到 **4m4x 秒**超时。
 >
-> 所以 `config.js` 现在是 `int('PORT', onDenoDeploy ? 8000 : 8787)`：`PORT` 有值就听它的
-> （平台哪天开始注入也自动生效），在 Deploy 上退回 8000，本地与自托管仍是 8787 ——
-> Caddyfile、systemd unit、healthcheck 都不用动。
+> 1. 平台**不会**注入 `PORT`。首次实测打得是 `listening on http://localhost:8787`（本地默认值）。
+>    所以 `config.js` 现在是 `int('PORT', onDenoDeploy ? 8000 : 8787)`：`PORT` 有值就听它的
+>    （平台哪天开始注入也自动生效），Deploy 上退回 8000，本地与自托管仍是 8787 ——
+>    Caddyfile、systemd unit、healthcheck 都不用动。
+> 2. 更隐蔽的那一半：**只有 `Deno.serve()` 起的监听会被平台接线**。平台把入站流量与 Warm up
+>    探针交给注入的 `DENO_SERVE_ADDRESS`（unix socket / vsock / tunnel），再由 control socket
+>    通知平台「Serving」。Express 的 `app.listen()` 走 `node:http`，在新运行时上是一个沙箱内部
+>    的原生 TCP 监听 —— 平台探不到，于是端口改对了也照样超时。
+>    旧版 Deploy 能用是因为那时 `node:http` 内部就是 `Deno.serve()`；运行时换成原生 socket 后
+>    就不成立了（Deno 后续 PR 才陆续给 `node:http` 补上 `DENO_SERVE_ADDRESS` 与 control socket 通知）。
+>
+> 所以 `index.js` 在 `onDenoDeploy` 时用 `Deno.serve({ port, onListen }, createFetchHandler(app))`，
+> 适配层在 `server/src/deno-serve.js`（node 风格 `(req, res)` ⇄ web `Request`/`Response`）；
+> 本地与自托管仍走 `app.listen()`。**换运行时时不要删掉这个分支。**
 
 > TLS：挂外库时 Deploy 注入的 `DATABASE_URL` 通常带 `?sslmode=require`，
 > `pg-connection-string` 会据此把 `ssl` 打开（`sslmode=require` → `ssl: true`），
@@ -420,6 +428,14 @@ $ deno run --allow-all src/index.js
 $ node scripts/smoke.mjs
   OK  38 passed, 0 failed                            # server stderr empty
 
+# ---- 同上，但强制走 Deploy 分支（Deno.serve + 适配层） ----
+$ DENO_DEPLOY=1 PORT=8787 deno run --allow-all src/index.js
+  portfolio api listening on http://localhost:8787    ← onListen 回调生效
+  db=sqlite → …\server\data\app.db
+  (stderr) !! DB_DRIVER is not "postgres" but DENO_DEPLOY is set: …   ← 预期的警告
+$ node scripts/smoke.mjs
+  OK  38 passed, 0 failed                            # 请求日志照常打印（finish 补发成功）
+
 # ---- Postgres 15（独立临时实例，127.0.0.1:5433） ----
 $ DB_DRIVER=postgres DATABASE_URL='postgresql://…@127.0.0.1:5433/portfolio' \
     deno run --allow-all src/seed.js --reset
@@ -472,8 +488,9 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 | 6 | `Buffer` 没有 import | Node 里是全局，**Deno 里不是** → 7 处直接 `ReferenceError` | `auth.js` / `oss.js` 各加 `import { Buffer } from 'node:buffer'` |
 | 7 | 启动日志报错数据库 | 连的是 Postgres，却打印 SQLite 文件路径（无条件输出 `config.databaseFile`） | 新增 `describeTarget()`，boot 日志与 CLI 共用；顺带修掉 CLI 里同样的硬编码 |
 | 8 | **概览面板不认 `*.read_all`**（`main` 上就有，**不是本次迁移引入的**） | `overview.js` 调 `ownershipClause()` 时没传 `scope`，而该函数「没传就是 `mine`」→ 全新 owner 打开后台看到**全 0**，可列表页却是 `canReadAll ? 'all' : 'mine'`，两边对不上 | 改成 `scope: req.query.scope ?? 'all'`（无权限者会被 `ownershipClause` 降级回 `mine`），并在 smoke 里补 2 条断言锁住行为 |
-| 9 | **Deploy 上端口回退成 8787**（只有真实部署才暴露） | 以为平台会注入 `PORT`，实际没有：应用打印 `listening on …:8787`，Warm up **4m44s** 超时，而应用自己的日志一切正常 | `config.js` 改成 `int('PORT', onDenoDeploy ? 8000 : 8787)` —— 平台探的是 `Deno.serve()` 的默认端口 8000 |
+| 9 | **Deploy 上端口回退成 8787**（只有真实部署才暴露） | 以为平台会注入 `PORT`，实际没有：应用打印 `listening on …:8787`，Warm up **4m44s** 超时，而应用自己的日志一切正常 | `config.js` 改成 `int('PORT', onDenoDeploy ? 8000 : 8787)` —— 但**端口只是表象**，同样的超时在端口改对后依旧复现，见第 11 条 |
 | 10 | **pre-deploy 命令撞构建超时**（同上，只有真实部署才暴露） | 空库时 bootstrap 灌完整演示内容 ≈ **2000 次往返**（894 张图 × upsert 的 `SELECT`+`INSERT`）：本地瞬间，跨区域托管 Postgres 上是几分钟 → pre-deploy 跑了 **5m36s** 被切断，日志停在 `seeding the demo content` | 拆出 `seedStructure()`（约 100 条语句）；`bootstrap.js` 默认只灌结构，演示内容交给 `deno task seed`（本机、无超时）或 `SEED_DEMO_CONTENT=1` |
+| 11 | **`app.listen()` 在新 Deno Deploy 上不被平台接线**（同上，只有真实部署才暴露） | 端口已改 8000，应用日志照样是健康的 `listening on http://localhost:8000`，Warm up 仍在 **4m43s** 超时、build 被 5 分钟上限切断。新 Deploy 只把入站流量与探针接到 `Deno.serve()`（经注入的 `DENO_SERVE_ADDRESS` + control socket），`node:http` 的原生监听平台看不见 —— Deploy Classic 已于 2026-07-20 关停、运行时换成原生 socket，`node:http` 因此不再被接线 | 新增 `server/src/deno-serve.js`：`createFetchHandler(nodeHandler)` 把 web `Request` 适配成 node 风格 `(req, res)`，再把 Express 写出的 status / headers / chunk 收成 `Response`；`index.js` 在 `onDenoDeploy` 时改用 `Deno.serve({ port, onListen }, createFetchHandler(app))`，本地与自托管保持 `app.listen()`。**不能用 socket 序列化**：Deno 的 `ServerResponse` 不往 socket 写头（实测 `res._header` 恒为空、请求挂死），必须从 Express 自身的 `writeHead`/`setHeader`/`write`/`end` 采集；适配层还要补发一次 `finish` 事件，否则访问日志不打印 |
 
 > 第 7 条值得单独强调：冒烟测试全绿，但只要看一眼启动日志就会以为自己在用 SQLite。
 > 这种"能跑但在说谎"的问题，只有真的把进程启起来盯着日志看才会发现。
@@ -482,7 +499,7 @@ OSS 签名上传、图片按 URL 登记、合集/单页/概览、审计日志写
 
 | 项 | 原因 |
 |---|---|
-| **Deno Deploy 实际部署** | 已在真实环境跑通（App directory = 仓库根、Entrypoint = `server/src/index.js`、Pre-Deploy = `bootstrap.js`）。仍需你确认的是**从本机连远端 Postgres 的 TLS 路径** —— 我没有连接串，只验证到 `pg-connection-string` 会认 `sslmode=require` |
+| **新 Deno Deploy 上的实际部署** | 早先那次「已在真实环境跑通」（App directory = 仓库根、Entrypoint = `server/src/index.js`、Pre-Deploy = `bootstrap.js`）是 **Deploy Classic**，该平台已于 **2026-07-20 关停**。新平台需要的 `Deno.serve()` 改动（§7.2 第 11 条）已在本地用 `DENO_DEPLOY=1` + 完整 38 项冒烟验证，但**真实部署尚未复验**：需要重新构建一次，确认 Warm up 能在几秒内通过。另外仍需你确认的是**从本机连远端 Postgres 的 TLS 路径** —— 我没有连接串，只验证到 `pg-connection-string` 会认 `sslmode=require` |
 | `? → $n` 转换器的边角分支 | 字符串字面量 / 注释 / `$tag$` 跳过逻辑都已实现，但本项目 SQL 没走到这些分支；JSONB 的 `?` / `?\|` 同理 |
 | 增量迁移 | 仍然没有迁移脚本。Pre-Deploy Command 现在跑的是 `bootstrap.js`（空库才灌 seed + 保证账号）；**schema 变更还是靠 boot 时的幂等 DDL** |
 | 外挂 Postgres 的 TLS | 本地实例走 trust 认证，`PGSSL=require` 与自签证书上传路径未验证 |
